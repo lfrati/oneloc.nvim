@@ -35,7 +35,7 @@ Super simple, there are only 2 functions you care aboout `show()` and `goto(n)` 
 
 `show()` creates a simple floating window that shows you the current locations
 
-<img width="551" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/cbba1a26-d243-4ab8-8a41-172195dd8a4f">
+<img width="714" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/757ad860-5f3f-436a-b891-98564b07996a">
 
 From there you have a few options:
 - `ESC` close the floating window.
@@ -58,4 +58,4 @@ Filenames in the floating window are highlighted to more easily see them at a gl
 
 |`short_path = false`| `short_path = true`|
 |---|---|
-| <img width="452" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/45f77d48-8c79-416d-8b12-a411b1fd3aca"> | <img width="269" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b8ceb740-e195-4a43-a50d-86372ed4b53b"> |
+| <img width="450" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/be299f02-3004-4a9d-88c9-7ea9f7ff8ccf"> | <img width="265" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b611e476-4b32-4a17-8de9-82c0deac4d08"> |
