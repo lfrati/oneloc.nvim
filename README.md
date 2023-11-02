@@ -58,10 +58,3 @@ Filenames in the floating window are highlighted to more easily see them at a gl
 |`short_path = false`| `short_path = true`|
 |---|---|
 | <img width="452" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/45f77d48-8c79-416d-8b12-a411b1fd3aca"> | <img width="269" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b8ceb740-e195-4a43-a50d-86372ed4b53b"> |
-
-```
-    flash_t = 200,
-    flash_color = "OnelocFlash",
-    file_color = "ErrorMsg",
-    short_path = true,
-```
