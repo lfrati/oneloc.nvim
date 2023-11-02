@@ -19,7 +19,8 @@ Using [lazy](https://github.com/folke/lazy.nvim)
         flash_t = 200,
         flash_color = "OnelocFlash",
         file_color = "ErrorMsg",
-        short_path = false
+        short_path = false,
+        granularity = "pos", -- or "file"
     }
     for i=1,5 do
         vim.keymap.set({ "n" }, "<Leader>"..i, ":lua require('oneloc').goto("..i..")<CR>")
@@ -55,9 +56,13 @@ Upon landing somewhere a flash helps find where the cursor is.
 
 Locations in the floating window, show the full path.
 - Lines are too long? Set `short_path = true` to show only the first letters of folders
-Filenames in the floating window are highlighted to more easily see them at a glance
-- Don't like the color? Set `file_color = <HIGHLIGHT>` in setup using your favorite hightlight group.
 
 |`short_path = false`| `short_path = true`|
 |---|---|
 | <img width="450" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/be299f02-3004-4a9d-88c9-7ea9f7ff8ccf"> | <img width="265" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b611e476-4b32-4a17-8de9-82c0deac4d08"> |
+
+Filenames in the floating window are highlighted to more easily see them at a glance
+- Don't like the color? Set `file_color = <HIGHLIGHT>` in setup using your favorite hightlight group.
+  
+Locations include line/column information, this lets you use this plugin as a replacement for marks too.
+- Don't like it and would rather just use it to jump between files? Set `granularity = "file"` in setup. This way you'll go back to files as if you used `:edit file`. If you want to restore the last location when re-opening a file check `:h restore-cursor` or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)
