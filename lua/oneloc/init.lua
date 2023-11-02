@@ -49,6 +49,18 @@ local function table_contains(tbl, x)
     return -1
 end
 
+local function split (inputstr, sep)
+    -- split string based on separator
+    if sep == nil then
+      sep = ":"
+    end
+    local t={}
+    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
+      table.insert(t, str)
+    end
+    return t
+end
+
 --------------------------------------------------------------------------------
 -- LOCAL STUFF
 --------------------------------------------------------------------------------
@@ -90,6 +102,30 @@ local function get_file_name(path)
       return path:match("[^/]*.$")
 end
 
+local function parse_loc_str(loc_str)
+    -- [[ Given a location like 
+    --
+    --      "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua:258:10"
+    --
+    --    parse it into the table:
+    --
+    --      { loc = "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua:258:10",
+    --        path = "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua",
+    --        line = 258,
+    --        col = 10,
+    --        filename = "init.lua"
+    --      }
+    -- ]]
+    local path, l, c = unpack(split(loc_str))
+    return {
+        loc=loc_str,
+        path=path,
+        line=tonumber(l),
+        col=tonumber(c),
+        filename=get_file_name(path)
+    }
+end
+
 local function make_float_win()
     -- if win exists already (~nil) delete it
     -- then create a floating win with the num-loc mappings
@@ -99,29 +135,30 @@ local function make_float_win()
 
     local lines = {}
     local width = 0 -- set win width to max length of lines
-    local line = ""
+    local entry = ""
     local files = {} -- used below to highlight filenames
 
     for i=1,5 do
-        local path = M.locations[i]
-        if path ~= nil and path ~= vim.NIL then
-            local file = get_file_name(path)
-            table.insert(files, file)
+        local loc_str = M.locations[i]
+        if loc_str ~= vim.NIL then
+
+            -- { loc path line col filename }
+            local location = parse_loc_str(loc_str)
+            table.insert(files, location.filename)
             if M.conf.short_path then
-                path = vim.fn.pathshorten(path)
+                location.path = vim.fn.pathshorten(location.path)
             end
+            entry = " "..i..") "..location.path..":"..location.line.." "
         else
             -- if there are no location still give some width to the win
-            path = "                          "
+            entry = " "..i..")                        "
         end
 
-        line = " "..i..") "..path.." "
-
-        if #line > width then
-            width = #line
+        if #entry > width then
+            width = #entry
         end
 
-        table.insert(lines, line)
+        table.insert(lines, entry)
     end
     -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
     local H = vim.api.nvim_list_uis()[1].height
@@ -177,7 +214,7 @@ local function update(n, path)
 end
 
 local function clear()
-    M.locations = {}
+    M.locations = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
     save(M.locations)
 end
 
@@ -211,6 +248,9 @@ end
 function M.show()
     -- WARNING: Need to get the path before focusing the make_float_wining window!
     local path = vim.api.nvim_buf_get_name(0)
+    local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
+
+    path = path..":"..lnum..":"..cnum
 
     make_float_win()
 
@@ -260,6 +300,32 @@ function M.show()
 end
 
 
+local function safe_landing(loc_string)
+
+    local location = parse_loc_str(loc_string)
+
+    vim.cmd.edit(location.path)
+
+    print("Moved to: " .. location.path)
+
+    -- we need to check we are landing somewhere that exists
+    local nlines = vim.api.nvim_buf_line_count(0)
+    -- target line exists
+    if location.line <= nlines then
+        vim.api.nvim_win_set_cursor(0, {location.line, 1})
+        local landing = vim.api.nvim_get_current_line()
+        -- target column exists
+        if #landing >= location.col then
+            vim.api.nvim_win_set_cursor(0, {location.line, location.col})
+        else
+            prompt("Target column doesn't exist.", "ErrorMsg")
+            return
+        end
+    else
+        prompt("Target line doesn't exist.", "ErrorMsg")
+        return
+    end
+end
 
 function M.goto(n)
     M.set_colors()
@@ -271,9 +337,8 @@ function M.goto(n)
     if location == vim.NIL then
         print("No location found for "..n)
     else
-        vim.cmd.edit(location)
+        safe_landing(location)
         flash_line()
-        print("Moved to: "..location)
     end
 end
 
