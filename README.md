@@ -8,7 +8,7 @@ Here is my take on a navigation plugin with a simple floating window and persist
 
 ## 📦 Installation
 
-Requires `neovim >= 0.8`
+Requires `neovim >= 0.9`
 
 Using [lazy](https://github.com/folke/lazy.nvim)
 ```lua

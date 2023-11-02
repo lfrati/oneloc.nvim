@@ -222,6 +222,35 @@ local function clear()
     save(M.locations)
 end
 
+local function safe_landing(loc_string)
+
+    local location = parse_loc_str(loc_string)
+
+    vim.cmd.edit(location.path)
+
+    print("Moved to: " .. location.path)
+
+    if M.conf.granularity == "pos" then
+        -- we need to check we are landing somewhere that exists
+        local nlines = vim.api.nvim_buf_line_count(0)
+        -- target line exists
+        if location.line <= nlines then
+            vim.api.nvim_win_set_cursor(0, {location.line, 1})
+            local landing = vim.api.nvim_get_current_line()
+            -- target column exists
+            if #landing >= location.col then
+                vim.api.nvim_win_set_cursor(0, {location.line, location.col})
+            else
+                prompt("Target column doesn't exist.", "ErrorMsg")
+                return
+            end
+        else
+            prompt("Target line doesn't exist.", "ErrorMsg")
+            return
+        end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- EXPORTED STUFF
 --------------------------------------------------------------------------------
@@ -249,8 +278,12 @@ function M.setup(user_conf)
     M.locations = load()
 end
 
-
 function M.show()
+    if vim.version().minor < 9 and vim.version().major <= 0 then
+        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
+        return nil
+    end
+
     -- WARNING: Need to get the path before focusing the make_float_wining window!
     local path = vim.api.nvim_buf_get_name(0)
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
@@ -259,9 +292,11 @@ function M.show()
 
     make_float_win()
 
-    --   ESC : closes the make_float_wining window
-    -- [1-5] : inserts current path in chosen, swaps what was there if needed
-    --     d : Prompt user y/N to delete all locations
+    --    ESC : closes the make_float_wining window
+    --  [1-5] : inserts current path in chosen, swaps what was there if needed
+    --      D : prompt user y/N to delete all locations
+    -- d[1-5] : delete correposding entry
+    --      g : toggle granularity
     while (true) do
         local key = getkey()
         local num = key:match("^[1-5]$")
@@ -311,37 +346,12 @@ function M.show()
     prompt("", 'Nornmal')
 end
 
-
-local function safe_landing(loc_string)
-
-    local location = parse_loc_str(loc_string)
-
-    vim.cmd.edit(location.path)
-
-    print("Moved to: " .. location.path)
-
-    if M.conf.granularity == "pos" then
-        -- we need to check we are landing somewhere that exists
-        local nlines = vim.api.nvim_buf_line_count(0)
-        -- target line exists
-        if location.line <= nlines then
-            vim.api.nvim_win_set_cursor(0, {location.line, 1})
-            local landing = vim.api.nvim_get_current_line()
-            -- target column exists
-            if #landing >= location.col then
-                vim.api.nvim_win_set_cursor(0, {location.line, location.col})
-            else
-                prompt("Target column doesn't exist.", "ErrorMsg")
-                return
-            end
-        else
-            prompt("Target line doesn't exist.", "ErrorMsg")
-            return
-        end
-    end
-end
-
 function M.goto(n)
+    if vim.version().minor < 9 and vim.version().major <= 0 then
+        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
+        return
+    end
+
     M.set_colors()
 
     -- api.nvim_echo({ { "ONETAB: ".. path, 'Normal' } }, false, {})
