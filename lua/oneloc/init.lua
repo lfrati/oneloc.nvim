@@ -294,6 +294,13 @@ function M.show()
             else
                 prompt("Deletion aborted.", 'Nornmal')
             end
+        elseif key == "g" then
+            if M.conf.granularity == "pos" then
+                M.conf.granularity = "file"
+            else
+                M.conf.granularity = "pos"
+            end
+            make_float_win()
         elseif num then
             update(tonumber(num), path)
             make_float_win()
