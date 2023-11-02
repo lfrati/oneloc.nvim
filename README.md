@@ -43,6 +43,7 @@ From there you have a few options:
 - `[1-5]` insert the current path in position `[1-5]`. If there was something there already, swap them.
 - `d[1-5]` delete location in position `[1-5]`.
 - `D` prompt the user `y/N` to delete ALL the locations.
+- `g` toggle granularity between `pos` (jump back to line/column where the location was saved) and `file` just open the file (may jump to last position, depending on your setup, see configuration)
 
 That's it. The only other piece is `goto(n)`, can you guess what it does?
 Yep. It opens the corresponding entry. (so `goto(2)` sends you to the second location in the floating windows, if it exists of course).
@@ -65,4 +66,4 @@ Filenames in the floating window are highlighted to more easily see them at a gl
 - Don't like the color? Set `file_color = <HIGHLIGHT>` in setup using your favorite hightlight group.
   
 Locations include line/column information, this lets you use this plugin as a replacement for marks too.
-- Don't like it and would rather just use it to jump between files? Set `granularity = "file"` in setup. This way you'll go back to files as if you used `:edit file`. If you want to restore the last location when re-opening a file check `:h restore-cursor` or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)
+- Don't like it and would rather just use it to jump between files? Set the default with `granularity = "file"` in setup. This way you'll go back to files as if you used `:edit file`. If you want to restore the last location when re-opening a file check `:h restore-cursor` or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)
