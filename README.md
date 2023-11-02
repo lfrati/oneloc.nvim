@@ -3,7 +3,8 @@
 ### Why oneloc.nvim?
 Some time ago I stumbled upon [harpoon](https://www.youtube.com/watch?v=Qnos8aApa9g).
 The idea is that you keep a persistent mapping between a small number of keys <-> locations.
-But it was a bit too complex for my tastes. So I made my simplified version. Hope you'll like it.
+From my search plugin [onesearch](https://github.com/lfrati/onesearch.nvim) I've realized I really like simple [minor-modes](https://www.gnu.org/software/emacs/manual/html_node/emacs/Minor-Modes.html).
+Here is my take on a navigation plugin with a simple floating window and persistent locations. Hope you'll like it 🙂 
 
 ## 📦 Installation
 
