@@ -33,9 +33,9 @@ end }
 
 Super simple, there are only 2 functions you care aboout `show()` and `goto(n)` (see example mappings above)
 
-`show()` creates a simple floating window that shows you the current locations
+`show()` creates a simple floating window that shows you the current locations:
 
-<img width="714" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/757ad860-5f3f-436a-b891-98564b07996a">
+<img width="625" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/38eb3f5f-9999-48a7-b1d5-58db6d636d9d">
 
 From there you have a few options:
 - `ESC` close the floating window.
@@ -45,6 +45,8 @@ From there you have a few options:
 
 That's it. The only other piece is `goto(n)`, can you guess what it does?
 Yep. It opens the corresponding entry. (so `goto(2)` sends you to the second location in the floating windows, if it exists of course).
+
+Note that when you add a new location, the line/column information is stored too. This way you can easily use it to move within large files, if you want.
 
 ## 🛠️ Configuration
 Upon landing somewhere a flash helps find where the cursor is.
