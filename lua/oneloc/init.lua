@@ -148,7 +148,11 @@ local function make_float_win()
             if M.conf.short_path then
                 location.path = vim.fn.pathshorten(location.path)
             end
-            entry = " "..i..") "..location.path..":"..location.line.." "
+            if M.conf.granularity == "pos" then
+                entry = " "..i..") "..location.path..":"..location.line.." "
+            else
+                entry = " "..i..") "..location.path.." "
+            end
         else
             -- if there are no location still give some width to the win
             entry = " "..i..")                        "
@@ -227,6 +231,7 @@ M.conf = {
     flash_color = "OnelocFlash",
     file_color = "ErrorMsg",
     short_path = true,
+    granularity = "pos"
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -308,22 +313,24 @@ local function safe_landing(loc_string)
 
     print("Moved to: " .. location.path)
 
-    -- we need to check we are landing somewhere that exists
-    local nlines = vim.api.nvim_buf_line_count(0)
-    -- target line exists
-    if location.line <= nlines then
-        vim.api.nvim_win_set_cursor(0, {location.line, 1})
-        local landing = vim.api.nvim_get_current_line()
-        -- target column exists
-        if #landing >= location.col then
-            vim.api.nvim_win_set_cursor(0, {location.line, location.col})
+    if M.conf.granularity == "pos" then
+        -- we need to check we are landing somewhere that exists
+        local nlines = vim.api.nvim_buf_line_count(0)
+        -- target line exists
+        if location.line <= nlines then
+            vim.api.nvim_win_set_cursor(0, {location.line, 1})
+            local landing = vim.api.nvim_get_current_line()
+            -- target column exists
+            if #landing >= location.col then
+                vim.api.nvim_win_set_cursor(0, {location.line, location.col})
+            else
+                prompt("Target column doesn't exist.", "ErrorMsg")
+                return
+            end
         else
-            prompt("Target column doesn't exist.", "ErrorMsg")
+            prompt("Target line doesn't exist.", "ErrorMsg")
             return
         end
-    else
-        prompt("Target line doesn't exist.", "ErrorMsg")
-        return
     end
 end
 
