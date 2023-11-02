@@ -135,9 +135,9 @@ local function make_float_win()
         col = (W - width) * 0.5,
         anchor = 'NW',
         style = 'minimal',
-        title="Oneloc:",
+        title = "Locations",
         title_pos = 'center',
-        border= 'rounded'
+        border = 'rounded'
     }
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
