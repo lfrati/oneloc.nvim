@@ -3,7 +3,8 @@
 ### Why oneloc.nvim?
 Some time ago I stumbled upon [harpoon](https://www.youtube.com/watch?v=Qnos8aApa9g).
 The idea is that you keep a persistent mapping between a small number of keys <-> locations.
-But it was a bit too complex for my tastes. So I made my simplified version. Hope you'll like it.
+From my search plugin [onesearch](https://github.com/lfrati/onesearch.nvim) I've realized I really like simple [minor-modes](https://www.gnu.org/software/emacs/manual/html_node/emacs/Minor-Modes.html).
+Here is my take on a navigation plugin with a simple floating window and persistent locations. Hope you'll like it 🙂 
 
 ## 📦 Installation
 
@@ -34,7 +35,7 @@ Super simple, there are only 2 functions you care aboout `show()` and `goto(n)` 
 
 `show()` creates a simple floating window that shows you the current locations
 
-<img width="551" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/cbba1a26-d243-4ab8-8a41-172195dd8a4f">
+<img width="714" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/757ad860-5f3f-436a-b891-98564b07996a">
 
 From there you have a few options:
 - `ESC` close the floating window.
@@ -57,11 +58,4 @@ Filenames in the floating window are highlighted to more easily see them at a gl
 
 |`short_path = false`| `short_path = true`|
 |---|---|
-| <img width="452" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/45f77d48-8c79-416d-8b12-a411b1fd3aca"> | <img width="269" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b8ceb740-e195-4a43-a50d-86372ed4b53b"> |
-
-```
-    flash_t = 200,
-    flash_color = "OnelocFlash",
-    file_color = "ErrorMsg",
-    short_path = true,
-```
+| <img width="450" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/be299f02-3004-4a9d-88c9-7ea9f7ff8ccf"> | <img width="265" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/b611e476-4b32-4a17-8de9-82c0deac4d08"> |
