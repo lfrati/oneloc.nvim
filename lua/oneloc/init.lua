@@ -55,8 +55,6 @@ local function flash_line()
         virt_text_pos = "overlay"
     })
     local bufnr = vim.fn.winbufnr(0)
-    -- vim.fn.win_getid()
-    -- vim.fn.win
     set_timeout(
         M.conf.flash_t,
         vim.schedule_wrap(function()
@@ -82,6 +80,45 @@ local function load()
     end
 end
 
+local function prompt(msg, style)
+    vim.cmd.redraw()
+    api.nvim_echo({ { msg, style } }, false, {})
+end
+
+local function readline_at_bytes(path, nbytes)
+    local file = io.open(path, "rb")
+    if file then
+      file:seek("set", nbytes)
+      local line = file:read()
+      file:close()
+      return line
+    end
+end
+
+local function fit_path_to_window(path, head, tail)
+    -- This is a bit of a pain because of the extra stuff around the path
+    -- e.g. "1) /Users/folder/file.lua:110"
+
+    local entry = head .. path .. tail
+    if #entry <= M.conf.width then
+        return entry
+    end
+
+    local short_path = vim.fn.pathshorten(path)
+    local short_entry = head .. short_path .. tail
+    if #short_entry <= M.conf.width then
+        return short_entry
+    end
+
+    return string.sub(short_entry, #short_entry - M.conf.width, #short_entry)
+end
+
+local function fit_line_to_window(line)
+    if #line > M.conf.width then
+        return string.sub(line, 1, M.conf.width)
+    end
+    return line
+end
 
 local function make_float_win()
     -- if win exists already (~nil) delete it
@@ -91,8 +128,6 @@ local function make_float_win()
     end
 
     local lines = {}
-    local width = 0 -- set win width to max length of lines
-    local entry = ""
     local files = {} -- used below to highlight filenames
 
     -- local loc_info  = {
@@ -109,6 +144,7 @@ local function make_float_win()
     for i=1,5 do
         local location = M.locations[i]
         local content
+        local entry
         if location ~= vim.NIL then
             table.insert(files, location.filename)
             local path
@@ -118,13 +154,12 @@ local function make_float_win()
                 path = location.path
             end
             if M.conf.granularity == "pos" then
-                entry = " " .. i .. ") "..path..":"..location.lnum.." "
-                content = "    " .. location.line
-                if #content > #entry then
-                    content = string.sub(content, 1, #entry)
-                end
+                local head = " " .. i .. ") "
+                local tail = ":"..location.lnum.." "
+                entry = fit_path_to_window(path, head, tail)
+                content = fit_line_to_window("    " .. location.line)
             else
-                entry = " "..i..") "..path.." "
+                entry = fit_line_to_window(" "..i..") "..path.." ")
                 content = ""
             end
         else
@@ -133,10 +168,6 @@ local function make_float_win()
             content = ""
         end
 
-        -- record max length to adjust window size
-        if #entry > width then
-            width = #entry
-        end
         table.insert(lines, entry)
         -- content lines are colored after window is created
         table.insert(lines, content)
@@ -156,10 +187,10 @@ local function make_float_win()
     local buf = vim.api.nvim_create_buf(false, true)
     local opts = {
         relative = 'win',
-        width = width,
+        width = M.conf.width,
         height = #lines,
         row = (H - #lines) * 0.5,
-        col = (W - width) * 0.5,
+        col = (W - M.conf.width) * 0.5,
         anchor = 'NW',
         style = 'minimal',
         title = "Locations",
@@ -181,16 +212,16 @@ local function make_float_win()
         vim.fn.matchadd(M.conf.file_color, file)
     end
 
-
-    -- color lines
+    -- color line based on "does it still match the stored value?"
     for i=1,5 do
         local location = M.locations[i]
         if location ~= vim.NIL then
-            local time = vim.fn.getftime(location.path)
-            if time > location.time then
-                vim.fn.matchaddpos(M.conf.outdated_color, {1+i*2})
-            else
+            local curline = readline_at_bytes(location.path, location.bytes_offset)
+            curline = string.gsub(curline, "^%s*(.-)%s*$", "%1")
+            if location.line == curline then
                 vim.fn.matchaddpos(M.conf.uptodate_color, {1+i*2})
+            else
+                vim.fn.matchaddpos(M.conf.outdated_color, {1+i*2})
             end
         end
     end
@@ -203,10 +234,6 @@ local function close_float_win()
     win = nil
 end
 
-local function prompt(msg, style)
-    vim.cmd.redraw()
-    api.nvim_echo({ { msg, style } }, false, {})
-end
 
 local function clear()
     M.locations = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
@@ -263,7 +290,8 @@ M.conf = {
     uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
     short_path = false,
     granularity = "pos", -- pos : include cursor position information
-    verbose = false
+    verbose = false,
+    width = 100
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -295,14 +323,15 @@ function M.show()
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
     local loc_str = path..":"..lnum..":"..cnum
     local loc_info  = {
-        loc=loc_str, -- string to be displayed in window
-        lnum=lnum,
-        cnum=cnum,
+        loc=loc_str, -- location string to be displayed in window
+        lnum=lnum, -- 1 indexed
+        cnum=cnum, -- 0 indexed >_>
         path=path, -- full path
         filename=vim.fn.expand("%:t"), -- filename only, for highlight
-        time = vim.fn.getftime(vim.fn.expand('%')),
-        -- remove leading and trailing spaces
-        line = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1")
+        -- remove leading and trailing spaces to show preview
+        line = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
+        -- bytes offset of the stored line to check if it has change 
+        bytes_offset = vim.fn.line2byte(lnum)
     }
 
     make_float_win()
@@ -387,6 +416,15 @@ function M.goto(n)
         safe_landing(location)
         flash_line()
     end
+end
+
+function M.get(n)
+    -- get the stored line information corresponding to entry n
+    -- can be used to search it in the buffer
+    if M.locations[n] == vim.NIL then
+        return ""
+    end
+    return M.locations[n].line
 end
 
 return M
