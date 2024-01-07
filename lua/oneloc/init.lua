@@ -1,6 +1,8 @@
 local M = {}
 local api = vim.api
 local uv = vim.loop
+local version = '1.0.0'
+
 
 -- https://stevedonovan.github.io/ldoc/manual/doc.md.html
 
@@ -103,17 +105,10 @@ local function make_float_win()
     --     line = vim.fn.getline(lnum)                  -- WIP: use it show what's at the destination
     -- }
 
-    if M.conf.granularity == "pos" then
-        table.insert(lines, "Mode: LINE")
-        table.insert(lines, "")
-    else
-        table.insert(lines, "Mode: FILE")
-        table.insert(lines, "")
-    end
-
+    table.insert(lines, "")
     for i=1,5 do
         local location = M.locations[i]
-
+        local content
         if location ~= vim.NIL then
             table.insert(files, location.filename)
             local path
@@ -124,12 +119,18 @@ local function make_float_win()
             end
             if M.conf.granularity == "pos" then
                 entry = " "..i..") "..path..":"..location.lnum.." "
+                content = location.line
+                if #content > #entry then
+                    content = string.sub(content, 1, #entry)
+                end
             else
                 entry = " "..i..") "..path.." "
+                content = ""
             end
         else
             -- if there are no location still give some width to the win
             entry = " "..i..")                        "
+            content = ""
         end
 
         -- record max length to adjust window size
@@ -137,7 +138,8 @@ local function make_float_win()
             width = #entry
         end
         table.insert(lines, entry)
-
+        -- content lines are colored after window is created
+        table.insert(lines, content)
     end
 
     if M.conf.verbose then
@@ -147,7 +149,7 @@ local function make_float_win()
         table.insert(lines, "  g: toggle (g)ranularity")
         table.insert(lines, "  i: (i)nsert")
     end
-     
+
     -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
     local H = vim.api.nvim_list_uis()[1].height
     local W = vim.api.nvim_list_uis()[1].width
@@ -170,13 +172,29 @@ local function make_float_win()
     vim.api.nvim_win_set_option(win, 'winhl', 'Normal:')
     vim.api.nvim_set_current_win(win)
 
+    -- WARNING: use after setting focuss to floating window
+    M.set_tui_colors()
+
     -- highlight filenames for easier reading
     -- WARNING: use after setting focus to floating window
     for _,file in pairs(files) do
         vim.fn.matchadd(M.conf.file_color, file)
     end
-    -- vim.fn.matchadd(M.conf.file_color, 'Mode: LINE')
-    -- vim.fn.matchadd(M.conf.file_color, 'Mode: FILE')
+
+
+    -- color lines
+    for i=1,5 do
+        local location = M.locations[i]
+        if location ~= vim.NIL then
+            local time = vim.fn.getftime(location.path)
+            if time > location.time then
+                vim.fn.matchaddpos(M.conf.outdated_color, {1+i*2})
+            else
+                vim.fn.matchaddpos(M.conf.uptodate_color, {1+i*2})
+            end
+        end
+    end
+
     vim.cmd.redraw()
 end
 
@@ -224,23 +242,34 @@ end
 -- EXPORTED STUFF
 --------------------------------------------------------------------------------
 
+-- from https://jdhao.github.io/2020/09/22/highlight_groups_cleared_in_nvim/
+-- some colorschemes can clear existing highlights >_>
+-- to make sure our colors works we set them every time search is started
+function M.set_editor_colors()
+    vim.api.nvim_set_hl(0, 'OnelocFlash', { fg = "#d4d4d4", bg = "#613315", bold = true })
+end
+
+function M.set_tui_colors()
+    vim.api.nvim_set_hl(0, 'OnelocGreen', { fg = "#4c8241", bold = true })
+    vim.api.nvim_set_hl(0, 'OnelocRed', { fg = "#f44747", bold = true })
+    vim.api.nvim_set_hl(0, 'OnelocGray', { fg = "#465166", bold = true })
+end
+
 M.conf = {
     flash_t = 200,
     flash_color = "OnelocFlash",
-    file_color = "ErrorMsg",
-    short_path = true,
+    file_color = "OnelocRed", --    highlight filenames          to be MORE VISIBLE
+    outdated_color = "OnelocGray", -- highlight outdated line info to be LESS VISIBLE
+    uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
+    short_path = false,
     granularity = "pos", -- pos : include cursor position information
     verbose = false
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
 
-function M.set_colors()
-    vim.api.nvim_set_hl(0, 'OnelocFlash', { fg = "#d4d4d4", bg = "#613315", bold = true })
-end
-
 function M.setup(user_conf)
     M.conf = vim.tbl_deep_extend("force", M.conf, user_conf or {})
-    M.json_path = vim.fn.stdpath("data") .. "/oneloc.json"
+    M.json_path = vim.fn.stdpath("data") .. "/oneloc_"..version..".json"
     if vim.fn.filereadable(M.json_path) == 0 then
         save({vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL})
         print("Initialized "..M.json_path)
@@ -272,7 +301,8 @@ function M.show()
         path=path, -- full path
         filename=vim.fn.expand("%:t"), -- filename only, for highlight
         time = vim.fn.getftime(vim.fn.expand('%')),
-        line = vim.fn.getline(lnum)
+        -- remove leading and trailing spaces
+        line = "   " .. string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1")
     }
 
     make_float_win()
@@ -346,9 +376,8 @@ function M.goto(n)
         return
     end
 
-    M.set_colors()
+    M.set_editor_colors()
 
-    -- api.nvim_echo({ { "ONETAB: ".. path, 'Normal' } }, false, {})
     M.locations = load()
 
     local location = M.locations[n]
