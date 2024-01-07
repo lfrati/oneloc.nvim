@@ -118,8 +118,8 @@ local function make_float_win()
                 path = location.path
             end
             if M.conf.granularity == "pos" then
-                entry = " "..i..") "..path..":"..location.lnum.." "
-                content = location.line
+                entry = " " .. i .. ") "..path..":"..location.lnum.." "
+                content = "    " .. location.line
                 if #content > #entry then
                     content = string.sub(content, 1, #entry)
                 end
@@ -302,7 +302,7 @@ function M.show()
         filename=vim.fn.expand("%:t"), -- filename only, for highlight
         time = vim.fn.getftime(vim.fn.expand('%')),
         -- remove leading and trailing spaces
-        line = "   " .. string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1")
+        line = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1")
     }
 
     make_float_win()
