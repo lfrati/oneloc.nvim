@@ -40,27 +40,6 @@ local function getkey()
     return key
 end
 
-local function table_contains(tbl, x)
-    for i, v in pairs(tbl) do
-        if v == x then
-            return i
-        end
-    end
-    return -1
-end
-
-local function split (inputstr, sep)
-    -- split string based on separator
-    if sep == nil then
-      sep = ":"
-    end
-    local t={}
-    for str in string.gmatch(inputstr, "([^"..sep.."]+)") do
-      table.insert(t, str)
-    end
-    return t
-end
-
 --------------------------------------------------------------------------------
 -- LOCAL STUFF
 --------------------------------------------------------------------------------
@@ -73,10 +52,13 @@ local function flash_line()
         virt_text = { { mask, M.conf.flash_color } },
         virt_text_pos = "overlay"
     })
+    local bufnr = vim.fn.winbufnr(0)
+    -- vim.fn.win_getid()
+    -- vim.fn.win
     set_timeout(
         M.conf.flash_t,
         vim.schedule_wrap(function()
-            api.nvim_buf_del_extmark(0, flash_ns, flash_id)
+            api.nvim_buf_del_extmark(bufnr, flash_ns, flash_id)
             vim.cmd("redraw")
         end))
 end
@@ -98,33 +80,6 @@ local function load()
     end
 end
 
-local function get_file_name(path)
-      return path:match("[^/]*.$")
-end
-
-local function parse_loc_str(loc_str)
-    -- [[ Given a location like 
-    --
-    --      "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua:258:10"
-    --
-    --    parse it into the table:
-    --
-    --      { loc = "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua:258:10",
-    --        path = "/Users/lfrati/git/oneloc.nvim/lua/oneloc/init.lua",
-    --        line = 258,
-    --        col = 10,
-    --        filename = "init.lua"
-    --      }
-    -- ]]
-    local path, l, c = unpack(split(loc_str))
-    return {
-        loc=loc_str,
-        path=path,
-        line=tonumber(l),
-        col=tonumber(c),
-        filename=get_file_name(path)
-    }
-end
 
 local function make_float_win()
     -- if win exists already (~nil) delete it
@@ -138,32 +93,61 @@ local function make_float_win()
     local entry = ""
     local files = {} -- used below to highlight filenames
 
-    for i=1,5 do
-        local loc_str = M.locations[i]
-        if loc_str ~= vim.NIL then
+    -- local loc_info  = {
+    --     loc=loc_str,                                 -- string to be displayed in window
+    --     lnum=lnum,                                   -- line number
+    --     cnum=cnum,                                   -- column number
+    --     path=path,                                   -- full path
+    --     filename=vim.fn.expand("%:t"),               -- filename only, for highlight
+    --     time = vim.fn.getftime(vim.fn.expand('%')),  -- WIP: use it to check if file changed
+    --     line = vim.fn.getline(lnum)                  -- WIP: use it show what's at the destination
+    -- }
 
-            -- { loc path line col filename }
-            local location = parse_loc_str(loc_str)
+    if M.conf.granularity == "pos" then
+        table.insert(lines, "Mode: LINE")
+        table.insert(lines, "")
+    else
+        table.insert(lines, "Mode: FILE")
+        table.insert(lines, "")
+    end
+
+    for i=1,5 do
+        local location = M.locations[i]
+
+        if location ~= vim.NIL then
             table.insert(files, location.filename)
+            local path
             if M.conf.short_path then
-                location.path = vim.fn.pathshorten(location.path)
+                path = vim.fn.pathshorten(location.path)
+            else
+                path = location.path
             end
             if M.conf.granularity == "pos" then
-                entry = " "..i..") "..location.path..":"..location.line.." "
+                entry = " "..i..") "..path..":"..location.lnum.." "
             else
-                entry = " "..i..") "..location.path.." "
+                entry = " "..i..") "..path.." "
             end
         else
             -- if there are no location still give some width to the win
             entry = " "..i..")                        "
         end
 
+        -- record max length to adjust window size
         if #entry > width then
             width = #entry
         end
-
         table.insert(lines, entry)
+
     end
+
+    if M.conf.verbose then
+        table.insert(lines, "")
+        table.insert(lines, "  D: (D)elete all")
+        table.insert(lines, "  d: (d)elete one")
+        table.insert(lines, "  g: toggle (g)ranularity")
+        table.insert(lines, "  i: (i)nsert")
+    end
+     
     -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
     local H = vim.api.nvim_list_uis()[1].height
     local W = vim.api.nvim_list_uis()[1].width
@@ -191,6 +175,8 @@ local function make_float_win()
     for _,file in pairs(files) do
         vim.fn.matchadd(M.conf.file_color, file)
     end
+    -- vim.fn.matchadd(M.conf.file_color, 'Mode: LINE')
+    -- vim.fn.matchadd(M.conf.file_color, 'Mode: FILE')
     vim.cmd.redraw()
 end
 
@@ -204,42 +190,25 @@ local function prompt(msg, style)
     api.nvim_echo({ { msg, style } }, false, {})
 end
 
-local function update(n, path)
-    local ix = table_contains(M.locations, path)
-    if ix == -1 then
-        -- new location
-        M.locations[n] = path
-    else
-        -- location exists already, swap old and new location
-        M.locations[ix] = M.locations[n]
-        M.locations[n] = path
-    end
-    save(M.locations)
-end
-
 local function clear()
     M.locations = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
     save(M.locations)
 end
 
-local function safe_landing(loc_string)
-
-    local location = parse_loc_str(loc_string)
+local function safe_landing(location)
 
     vim.cmd.edit(location.path)
-
     print("Moved to: " .. location.path)
-
     if M.conf.granularity == "pos" then
         -- we need to check we are landing somewhere that exists
         local nlines = vim.api.nvim_buf_line_count(0)
         -- target line exists
-        if location.line <= nlines then
-            vim.api.nvim_win_set_cursor(0, {location.line, 1})
+        if location.lnum <= nlines then
+            vim.api.nvim_win_set_cursor(0, {location.lnum, 1})
             local landing = vim.api.nvim_get_current_line()
             -- target column exists
-            if #landing >= location.col then
-                vim.api.nvim_win_set_cursor(0, {location.line, location.col})
+            if #landing >= location.cnum then
+                vim.api.nvim_win_set_cursor(0, {location.lnum, location.cnum})
             else
                 prompt("Target column doesn't exist.", "ErrorMsg")
                 return
@@ -260,7 +229,8 @@ M.conf = {
     flash_color = "OnelocFlash",
     file_color = "ErrorMsg",
     short_path = true,
-    granularity = "pos"
+    granularity = "pos", -- pos : include cursor position information
+    verbose = false
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -278,6 +248,13 @@ function M.setup(user_conf)
     M.locations = load()
 end
 
+local function check_range(key)
+    local num = key:match("^[1-5]$")
+    if num then
+        return tonumber(num) or 1 -- or 1 to silence the check nil nagging
+    end
+end
+
 function M.show()
     if vim.version().minor < 9 and vim.version().major <= 0 then
         prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
@@ -287,8 +264,16 @@ function M.show()
     -- WARNING: Need to get the path before focusing the make_float_wining window!
     local path = vim.api.nvim_buf_get_name(0)
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
-
-    path = path..":"..lnum..":"..cnum
+    local loc_str = path..":"..lnum..":"..cnum
+    local loc_info  = {
+        loc=loc_str, -- string to be displayed in window
+        lnum=lnum,
+        cnum=cnum,
+        path=path, -- full path
+        filename=vim.fn.expand("%:t"), -- filename only, for highlight
+        time = vim.fn.getftime(vim.fn.expand('%')),
+        line = vim.fn.getline(lnum)
+    }
 
     make_float_win()
 
@@ -297,9 +282,9 @@ function M.show()
     --      D : prompt user y/N to delete all locations
     -- d[1-5] : delete correposding entry
     --      g : toggle granularity
+    --      i : insert
     while (true) do
         local key = getkey()
-        local num = key:match("^[1-5]$")
 
         if key == M.K_Esc then
             break
@@ -316,16 +301,11 @@ function M.show()
         elseif key == "d" then
             prompt("Which location to delete? [1-5]", 'WarningMsg')
             key = getkey()
-            num = key:match("^[1-5]$")
+            local num = check_range(key)
             if num then
-                num = tonumber(num)
-                local old = M.locations[num]
-                if num and old ~= vim.NIL then
-                    M.locations[num] = vim.NIL
-                    save(M.locations)
-                    prompt("Location ["..num..") "..old.."] deleted.", 'WarningMsg')
-                    make_float_win()
-                end
+                M.locations[num] = vim.NIL
+                save(M.locations)
+                make_float_win()
             else
                 prompt("Deletion aborted.", 'Nornmal')
             end
@@ -336,15 +316,29 @@ function M.show()
                 M.conf.granularity = "pos"
             end
             make_float_win()
-        elseif num then
-            update(tonumber(num), path)
-            make_float_win()
+        elseif key == "i" then
+            key = getkey()
+            prompt("Got"..key, 'WarningMsg')
+            local num = check_range(key)
+            if num then
+                M.locations[num] = loc_info
+                save(M.locations)
+                make_float_win()
+            end
+        else
+            local num = check_range(key)
+            if num then
+                close_float_win()
+                M.goto(num)
+                make_float_win()
+            end
         end
     end
 
     close_float_win()
     prompt("", 'Nornmal')
 end
+
 
 function M.goto(n)
     if vim.version().minor < 9 and vim.version().major <= 0 then
