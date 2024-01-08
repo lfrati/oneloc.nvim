@@ -88,7 +88,7 @@ end
 local function readline_at_bytes(path, nbytes)
     local file = io.open(path, "rb")
     if file then
-      file:seek("set", nbytes)
+      file:seek("set", nbytes - 1)
       local line = file:read()
       file:close()
       return line
@@ -97,7 +97,9 @@ end
 
 local function fit_path_to_window(path, head, tail)
     -- This is a bit of a pain because of the extra stuff around the path
-    -- e.g. "1) /Users/folder/file.lua:110"
+    -- e.g.   normal "1) /Users/user/folder/file.lua:110"
+    --       shorter "1) /U/u/f/file.lua:110"
+    --      shortest "1) ile.lua:110"
 
     local entry = head .. path .. tail
     if #entry <= M.conf.width then
@@ -110,11 +112,13 @@ local function fit_path_to_window(path, head, tail)
         return short_entry
     end
 
-    return string.sub(short_entry, #short_entry - M.conf.width, #short_entry)
+    local shortest_path = short_path .. tail
+    shortest_path = string.sub(shortest_path, #short_entry - M.conf.width + #head, #shortest_path)
+    return head .. shortest_path
 end
 
 local function fit_line_to_window(line)
-    if #line > M.conf.width then
+    if #line >= M.conf.width then
         return string.sub(line, 1, M.conf.width)
     end
     return line
@@ -129,16 +133,6 @@ local function make_float_win()
 
     local lines = {}
     local files = {} -- used below to highlight filenames
-
-    -- local loc_info  = {
-    --     loc=loc_str,                                 -- string to be displayed in window
-    --     lnum=lnum,                                   -- line number
-    --     cnum=cnum,                                   -- column number
-    --     path=path,                                   -- full path
-    --     filename=vim.fn.expand("%:t"),               -- filename only, for highlight
-    --     time = vim.fn.getftime(vim.fn.expand('%')),  -- WIP: use it to check if file changed
-    --     line = vim.fn.getline(lnum)                  -- WIP: use it show what's at the destination
-    -- }
 
     table.insert(lines, "")
     for i=1,5 do
@@ -163,22 +157,13 @@ local function make_float_win()
                 content = ""
             end
         else
-            -- if there are no location still give some width to the win
-            entry = " "..i..")                        "
+            entry = fit_line_to_window(" "..i..")                        ")
             content = ""
         end
 
         table.insert(lines, entry)
         -- content lines are colored after window is created
         table.insert(lines, content)
-    end
-
-    if M.conf.verbose then
-        table.insert(lines, "")
-        table.insert(lines, "  D: (D)elete all")
-        table.insert(lines, "  d: (d)elete one")
-        table.insert(lines, "  g: toggle (g)ranularity")
-        table.insert(lines, "  i: (i)nsert")
     end
 
     -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
@@ -218,6 +203,7 @@ local function make_float_win()
         if location ~= vim.NIL then
             local curline = readline_at_bytes(location.path, location.bytes_offset)
             curline = string.gsub(curline, "^%s*(.-)%s*$", "%1")
+            print("Compare ", curline, location.line)
             if location.line == curline then
                 vim.fn.matchaddpos(M.conf.uptodate_color, {1+i*2})
             else
@@ -290,7 +276,6 @@ M.conf = {
     uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
     short_path = false,
     granularity = "pos", -- pos : include cursor position information
-    verbose = false,
     width = 100
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
@@ -312,17 +297,11 @@ local function check_range(key)
     end
 end
 
-function M.show()
-    if vim.version().minor < 9 and vim.version().major <= 0 then
-        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
-        return nil
-    end
-
-    -- WARNING: Need to get the path before focusing the make_float_wining window!
+local function cursor2entry()
     local path = vim.api.nvim_buf_get_name(0)
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
     local loc_str = path..":"..lnum..":"..cnum
-    local loc_info  = {
+    return {
         loc=loc_str, -- location string to be displayed in window
         lnum=lnum, -- 1 indexed
         cnum=cnum, -- 0 indexed >_>
@@ -333,6 +312,16 @@ function M.show()
         -- bytes offset of the stored line to check if it has change 
         bytes_offset = vim.fn.line2byte(lnum)
     }
+end
+
+function M.show()
+    if vim.version().minor < 9 and vim.version().major <= 0 then
+        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
+        return nil
+    end
+
+    -- WARNING: Need to get the path before focusing the make_float_wining window!
+    local loc_info = cursor2entry()
 
     make_float_win()
 
@@ -398,6 +387,15 @@ function M.show()
     prompt("", 'Nornmal')
 end
 
+function M.store(n)
+    -- we expose a function than can write entries directly (not through the window)
+    -- so that user can set up their own key bindings.
+    if 1 <= n and n <=5  then
+        local loc_info = cursor2entry()
+        M.locations[n] = loc_info
+        save(M.locations)
+    end
+end
 
 function M.goto(n)
     if vim.version().minor < 9 and vim.version().major <= 0 then
