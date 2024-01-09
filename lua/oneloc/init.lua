@@ -1,8 +1,7 @@
 local M = {}
 local api = vim.api
 local uv = vim.loop
-local version = '1.0.0'
-
+local version = '1.1.0'
 
 -- https://stevedonovan.github.io/ldoc/manual/doc.md.html
 
@@ -85,7 +84,19 @@ local function prompt(msg, style)
     api.nvim_echo({ { msg, style } }, false, {})
 end
 
-local function readline_at_bytes(path, nbytes)
+local function read_nth_line(path, n)
+    local line_count = 0
+
+    for line in io.lines(path) do
+        line_count = line_count + 1
+        if line_count == n then
+            return line
+        end
+    end
+    return nil  -- Return nil if the file has fewer than n lines
+end
+
+local function read_line_at_bytes(path, nbytes)
     local file = io.open(path, "rb")
     if file then
       file:seek("set", nbytes - 1)
@@ -124,47 +135,94 @@ local function fit_line_to_window(line)
     return line
 end
 
-local function make_float_win()
-    -- if win exists already (~nil) delete it
-    -- then create a floating win with the num-loc mappings
-    if win then
-        vim.api.nvim_win_close(win, true)
-    end
-
+local function render(items)
     local lines = {}
-    local files = {} -- used below to highlight filenames
+    local files = {} -- used to highlight filenames
 
     table.insert(lines, "")
     for i=1,5 do
-        local location = M.locations[i]
+        local item = items[i]
         local content
         local entry
-        if location ~= vim.NIL then
-            table.insert(files, location.filename)
-            local path
-            if M.conf.short_path then
-                path = vim.fn.pathshorten(location.path)
-            else
-                path = location.path
-            end
+        if item ~= vim.NIL then
+            table.insert(files, item.filename)
+            local path = item.path
             if M.conf.granularity == "pos" then
-                local head = " " .. i .. ") "
-                local tail = ":"..location.lnum.." "
+                local head = " " .. i .. " "
+                local tail = ":"..item.lnum.." "
                 entry = fit_path_to_window(path, head, tail)
-                content = fit_line_to_window("    " .. location.line)
+                content = fit_line_to_window("    " .. item.content)
             else
-                entry = fit_line_to_window(" "..i..") "..path.." ")
+                entry = fit_line_to_window(" "..i.." "..path.." ")
                 content = ""
             end
         else
-            entry = fit_line_to_window(" "..i..")                        ")
+            entry = fit_line_to_window(" "..i.."                        ")
             content = ""
         end
 
         table.insert(lines, entry)
         -- content lines are colored after window is created
         table.insert(lines, content)
+        table.insert(lines, "")
     end
+
+    return lines, files
+end
+
+local function check_if_same(item)
+
+    -- fast path
+    local current = read_line_at_bytes(item.path, item.bytes_offset)
+    current = string.gsub(current, "^%s*(.-)%s*$", "%1")
+    if current == item.content then
+        return true
+    end
+
+    -- slow path
+    current = read_nth_line(item.path, item.lnum)
+    if current then
+        current = string.gsub(current, "^%s*(.-)%s*$", "%1")
+        if current == item.content then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function colorize(items)
+
+    -- https://stackoverflow.com/a/23247938
+    vim.cmd[[
+        hi Bang ctermfg=yellow guifg=yellow
+        match Bang /\%>1v.*\%<3v/
+    ]]
+
+    -- color line based on "does it still match the stored value?"
+    for i=1,5 do
+        local item = items[i]
+        if item ~= vim.NIL then
+            if check_if_same(item) then
+                -- 1 line of padding
+                -- each item spans 3 lines 
+                -- line content is the second line of the 3
+                vim.fn.matchaddpos( M.conf.uptodate_color, {1 + (i-1)*3 + 2})
+            else
+                vim.fn.matchaddpos(M.conf.outdated_color, {1 + (i-1)*3 + 2})
+            end
+        end
+    end
+end
+
+local function make_ui()
+    -- if win exists already (~nil) delete it
+    -- then create a floating win with the num-loc mappings
+    if win then
+        vim.api.nvim_win_close(win, true)
+    end
+
+    local lines, files = render(M.items)
 
     -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
     local H = vim.api.nvim_list_uis()[1].height
@@ -197,20 +255,7 @@ local function make_float_win()
         vim.fn.matchadd(M.conf.file_color, file)
     end
 
-    -- color line based on "does it still match the stored value?"
-    for i=1,5 do
-        local location = M.locations[i]
-        if location ~= vim.NIL then
-            local curline = readline_at_bytes(location.path, location.bytes_offset)
-            curline = string.gsub(curline, "^%s*(.-)%s*$", "%1")
-            print("Compare ", curline, location.line)
-            if location.line == curline then
-                vim.fn.matchaddpos(M.conf.uptodate_color, {1+i*2})
-            else
-                vim.fn.matchaddpos(M.conf.outdated_color, {1+i*2})
-            end
-        end
-    end
+    colorize(M.items)
 
     vim.cmd.redraw()
 end
@@ -222,24 +267,25 @@ end
 
 
 local function clear()
-    M.locations = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
-    save(M.locations)
+    M.items = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
+    save(M.items)
 end
 
-local function safe_landing(location)
+local function safe_landing(item)
 
-    vim.cmd.edit(location.path)
-    print("Moved to: " .. location.path)
+    vim.cmd.edit(item.path)
+    print("Moved to: " .. item.path)
+
     if M.conf.granularity == "pos" then
         -- we need to check we are landing somewhere that exists
         local nlines = vim.api.nvim_buf_line_count(0)
         -- target line exists
-        if location.lnum <= nlines then
-            vim.api.nvim_win_set_cursor(0, {location.lnum, 1})
+        if item.lnum <= nlines then
+            vim.api.nvim_win_set_cursor(0, {item.lnum, 1})
             local landing = vim.api.nvim_get_current_line()
             -- target column exists
-            if #landing >= location.cnum then
-                vim.api.nvim_win_set_cursor(0, {location.lnum, location.cnum})
+            if #landing >= item.cnum then
+                vim.api.nvim_win_set_cursor(0, {item.lnum, item.cnum})
             else
                 prompt("Target column doesn't exist.", "ErrorMsg")
                 return
@@ -249,6 +295,8 @@ local function safe_landing(location)
             return
         end
     end
+
+    vim.cmd("norm zz")
 end
 
 --------------------------------------------------------------------------------
@@ -263,20 +311,19 @@ function M.set_editor_colors()
 end
 
 function M.set_tui_colors()
-    vim.api.nvim_set_hl(0, 'OnelocGreen', { fg = "#4c8241", bold = true })
-    vim.api.nvim_set_hl(0, 'OnelocRed', { fg = "#f44747", bold = true })
-    vim.api.nvim_set_hl(0, 'OnelocGray', { fg = "#465166", bold = true })
+    vim.api.nvim_set_hl(0, 'OnelocGreen', { fg = "green", bold = true })
+    vim.api.nvim_set_hl(0, 'OnelocRed', { fg = "red", bold = true })
+    vim.api.nvim_set_hl(0, 'OnelocGray', { fg = "gray", bold = true })
 end
 
 M.conf = {
     flash_t = 200,
     flash_color = "OnelocFlash",
-    file_color = "OnelocRed", --    highlight filenames          to be MORE VISIBLE
-    outdated_color = "OnelocGray", -- highlight outdated line info to be LESS VISIBLE
+    file_color = "OnelocRed", --        highlight filenames          to be MORE VISIBLE
+    outdated_color = "OnelocGray", --   highlight outdated line info to be LESS VISIBLE
     uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
-    short_path = false,
     granularity = "pos", -- pos : include cursor position information
-    width = 100
+    width = 70
 }
 M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
 
@@ -287,7 +334,7 @@ function M.setup(user_conf)
         save({vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL})
         print("Initialized "..M.json_path)
     end
-    M.locations = load()
+    M.items = load()
 end
 
 local function check_range(key)
@@ -297,18 +344,16 @@ local function check_range(key)
     end
 end
 
-local function cursor2entry()
+local function cursor2item()
     local path = vim.api.nvim_buf_get_name(0)
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
-    local loc_str = path..":"..lnum..":"..cnum
     return {
-        loc=loc_str, -- location string to be displayed in window
         lnum=lnum, -- 1 indexed
         cnum=cnum, -- 0 indexed >_>
         path=path, -- full path
         filename=vim.fn.expand("%:t"), -- filename only, for highlight
         -- remove leading and trailing spaces to show preview
-        line = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
+        content = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
         -- bytes offset of the stored line to check if it has change 
         bytes_offset = vim.fn.line2byte(lnum)
     }
@@ -321,9 +366,9 @@ function M.show()
     end
 
     -- WARNING: Need to get the path before focusing the make_float_wining window!
-    local loc_info = cursor2entry()
+    local loc_info = cursor2item()
 
-    make_float_win()
+    make_ui()
 
     --    ESC : closes the make_float_wining window
     --  [1-5] : inserts current path in chosen, swaps what was there if needed
@@ -342,7 +387,7 @@ function M.show()
             if key == "y" then
                 clear()
                 prompt("Locations deleted.", 'WarningMsg')
-                make_float_win()
+                make_ui()
             else
                 prompt("Deletion aborted.", 'Nornmal')
             end
@@ -351,9 +396,9 @@ function M.show()
             key = getkey()
             local num = check_range(key)
             if num then
-                M.locations[num] = vim.NIL
-                save(M.locations)
-                make_float_win()
+                M.items[num] = vim.NIL
+                save(M.items)
+                make_ui()
             else
                 prompt("Deletion aborted.", 'Nornmal')
             end
@@ -363,22 +408,22 @@ function M.show()
             else
                 M.conf.granularity = "pos"
             end
-            make_float_win()
+            make_ui()
         elseif key == "i" then
             key = getkey()
             prompt("Got"..key, 'WarningMsg')
             local num = check_range(key)
             if num then
-                M.locations[num] = loc_info
-                save(M.locations)
-                make_float_win()
+                M.items[num] = loc_info
+                save(M.items)
+                make_ui()
             end
         else
             local num = check_range(key)
             if num then
                 close_float_win()
                 M.goto(num)
-                make_float_win()
+                make_ui()
             end
         end
     end
@@ -391,9 +436,9 @@ function M.store(n)
     -- we expose a function than can write entries directly (not through the window)
     -- so that user can set up their own key bindings.
     if 1 <= n and n <=5  then
-        local loc_info = cursor2entry()
-        M.locations[n] = loc_info
-        save(M.locations)
+        local loc_info = cursor2item()
+        M.items[n] = loc_info
+        save(M.items)
     end
 end
 
@@ -405,24 +450,24 @@ function M.goto(n)
 
     M.set_editor_colors()
 
-    M.locations = load()
-
-    local location = M.locations[n]
-    if location == vim.NIL then
+    M.items = load()
+    local destination = M.items[n]
+    if destination == vim.NIL then
         print("No location found for "..n)
-    else
-        safe_landing(location)
-        flash_line()
+        return
     end
+
+    safe_landing(destination)
+    flash_line()
 end
 
 function M.get(n)
     -- get the stored line information corresponding to entry n
     -- can be used to search it in the buffer
-    if M.locations[n] == vim.NIL then
+    if M.items[n] == vim.NIL then
         return ""
     end
-    return M.locations[n].line
+    return M.items[n].content
 end
 
 return M
