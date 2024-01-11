@@ -3,6 +3,24 @@ local api = vim.api
 local uv = vim.loop
 local version = '1.1.0'
 
+
+
+local LIFOStack = {}
+function LIFOStack:new()
+    local obj = {data = {}}
+    setmetatable(obj, {__index = self})
+    return obj
+end
+function LIFOStack:push(value)
+    table.insert(self.data, value)
+end
+function LIFOStack:pop()
+    if #self.data == 0 then
+        return vim.NIL
+    end
+    return table.remove(self.data)
+end
+
 -- https://stevedonovan.github.io/ldoc/manual/doc.md.html
 
 local flash_ns = vim.api.nvim_create_namespace("OnelocFlash")
@@ -147,9 +165,9 @@ local function render(items)
         if item ~= vim.NIL then
             table.insert(files, item.filename)
             local path = item.path
-            if M.conf.granularity == "pos" then
+            if M.conf.scope == "pos" then
                 local head = " " .. i .. " "
-                local tail = ":"..item.lnum.." "
+                local tail = ":"..item.lnum..":"..item.cnum.." "
                 entry = fit_path_to_window(path, head, tail)
                 content = fit_line_to_window("    " .. item.content)
             else
@@ -215,7 +233,7 @@ local function colorize(items)
     end
 end
 
-local function make_ui()
+local function open_ui()
     -- if win exists already (~nil) delete it
     -- then create a floating win with the num-loc mappings
     if win then
@@ -260,15 +278,11 @@ local function make_ui()
     vim.cmd.redraw()
 end
 
-local function close_float_win()
-    vim.api.nvim_win_close(win, true)
-    win = nil
-end
-
-
-local function clear()
-    M.items = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
-    save(M.items)
+local function close_ui()
+    if win then
+        vim.api.nvim_win_close(win, true)
+        win = nil
+    end
 end
 
 local function safe_landing(item)
@@ -276,27 +290,78 @@ local function safe_landing(item)
     vim.cmd.edit(item.path)
     print("Moved to: " .. item.path)
 
-    if M.conf.granularity == "pos" then
+    if M.conf.scope == "pos" then
         -- we need to check we are landing somewhere that exists
+
         local nlines = vim.api.nvim_buf_line_count(0)
         -- target line exists
-        if item.lnum <= nlines then
-            vim.api.nvim_win_set_cursor(0, {item.lnum, 1})
-            local landing = vim.api.nvim_get_current_line()
-            -- target column exists
-            if #landing >= item.cnum then
-                vim.api.nvim_win_set_cursor(0, {item.lnum, item.cnum})
-            else
-                prompt("Target column doesn't exist.", "ErrorMsg")
-                return
-            end
-        else
+        if nlines < item.lnum  then
             prompt("Target line doesn't exist.", "ErrorMsg")
             return
         end
+
+        vim.api.nvim_win_set_cursor(0, {item.lnum, 1})
+
+        local landing = vim.api.nvim_get_current_line()
+        if #landing < item.cnum then
+            prompt("Target column doesn't exist.", "ErrorMsg")
+            return
+        end
+
+        vim.api.nvim_win_set_cursor(0, {item.lnum, item.cnum})
     end
 
     vim.cmd("norm zz")
+end
+
+local function cursor2item()
+    local path = vim.api.nvim_buf_get_name(0)
+    local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
+    return {
+        lnum=lnum, -- 1 indexed
+        cnum=cnum, -- 0 indexed >_>
+        path=path, -- full path
+        filename=vim.fn.expand("%:t"), -- filename only, for highlight
+        -- remove leading and trailing spaces to show preview
+        content = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
+        -- bytes offset of the stored line to check if it has change 
+        bytes_offset = vim.fn.line2byte(lnum)
+    }
+end
+
+local function insert(n, item)
+    if 1 <= n and n <=5  then
+        M.stack:push({op="insert", pos=n, item=M.items[n]})
+        M.items[n] = item
+        save(M.items)
+    end
+end
+
+local function remove(n)
+    if M.items[n] then
+        M.stack:push({op="insert", pos=n, item=M.items[n]})
+        M.items[n] = vim.NIL
+        save(M.items)
+    end
+end
+
+local function undo()
+    local action = M.stack:pop()
+    if action == vim.NIL then
+        return
+    end
+
+    if action.op == "insert" then
+        M.items[action.pos] = action.item
+        save(M.items)
+    end
+end
+
+local function check_range(key)
+    local num = key:match("^[1-5]$")
+    if num then
+        return tonumber(num) or 1 -- or 1 to silence the check nil nagging
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -322,10 +387,12 @@ M.conf = {
     file_color = "OnelocRed", --        highlight filenames          to be MORE VISIBLE
     outdated_color = "OnelocGray", --   highlight outdated line info to be LESS VISIBLE
     uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
-    granularity = "pos", -- pos : include cursor position information
+    scope = "pos", -- pos : include cursor position information
     width = 70
 }
-M.K_Esc = api.nvim_replace_termcodes('<Esc>', true, false, true)
+M.K_ESC = api.nvim_replace_termcodes('<Esc>', true, false, true)
+M.K_TAB = api.nvim_replace_termcodes('<Tab>', true, false, true)
+M.stack = LIFOStack:new()
 
 function M.setup(user_conf)
     M.conf = vim.tbl_deep_extend("force", M.conf, user_conf or {})
@@ -337,111 +404,62 @@ function M.setup(user_conf)
     M.items = load()
 end
 
-local function check_range(key)
-    local num = key:match("^[1-5]$")
-    if num then
-        return tonumber(num) or 1 -- or 1 to silence the check nil nagging
-    end
-end
-
-local function cursor2item()
-    local path = vim.api.nvim_buf_get_name(0)
-    local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
-    return {
-        lnum=lnum, -- 1 indexed
-        cnum=cnum, -- 0 indexed >_>
-        path=path, -- full path
-        filename=vim.fn.expand("%:t"), -- filename only, for highlight
-        -- remove leading and trailing spaces to show preview
-        content = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
-        -- bytes offset of the stored line to check if it has change 
-        bytes_offset = vim.fn.line2byte(lnum)
-    }
-end
-
 function M.show()
     if vim.version().minor < 9 and vim.version().major <= 0 then
         prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
         return nil
     end
 
-    -- WARNING: Need to get the path before focusing the make_float_wining window!
-    local loc_info = cursor2item()
+    open_ui()
 
-    make_ui()
-
-    --    ESC : closes the make_float_wining window
-    --  [1-5] : inserts current path in chosen, swaps what was there if needed
-    --      D : prompt user y/N to delete all locations
-    -- d[1-5] : delete correposding entry
-    --      g : toggle granularity
-    --      i : insert
+    --    ESC : close the UI
+    --  [1-5] : jump to the corresponding entry
+    --      D : delete all location
+    -- d[1-5] : delete one location
+    --    TAB : toggle scope (file vs pos)
+    --      u : undo last insertion/deletion
     while (true) do
         local key = getkey()
 
-        if key == M.K_Esc then
+        if key == M.K_ESC then
             break
         elseif key == "D" then
-            prompt("Delete ALL the locations? [y/N]", 'WarningMsg')
-            key = getkey()
-            if key == "y" then
-                clear()
-                prompt("Locations deleted.", 'WarningMsg')
-                make_ui()
-            else
-                prompt("Deletion aborted.", 'Nornmal')
+            for i =1,5 do
+                if M.items[i] ~= vim.NIL then
+                    remove(i)
+                end
             end
         elseif key == "d" then
-            prompt("Which location to delete? [1-5]", 'WarningMsg')
-            key = getkey()
-            local num = check_range(key)
+            local num = check_range(getkey())
             if num then
-                M.items[num] = vim.NIL
-                save(M.items)
-                make_ui()
-            else
-                prompt("Deletion aborted.", 'Nornmal')
+                remove(num)
             end
-        elseif key == "g" then
-            if M.conf.granularity == "pos" then
-                M.conf.granularity = "file"
-            else
-                M.conf.granularity = "pos"
-            end
-            make_ui()
-        elseif key == "i" then
-            key = getkey()
-            prompt("Got"..key, 'WarningMsg')
-            local num = check_range(key)
-            if num then
-                M.items[num] = loc_info
-                save(M.items)
-                make_ui()
-            end
+        elseif key == M.K_TAB then
+            M.conf.scope = (M.conf.scope == "file") and "pos" or "file"
+        elseif key == "u" then
+            undo()
         else
             local num = check_range(key)
             if num then
-                close_float_win()
+                close_ui()
                 M.goto(num)
-                make_ui()
             end
         end
+        open_ui()
     end
 
-    close_float_win()
+    close_ui()
     prompt("", 'Nornmal')
 end
 
-function M.store(n)
-    -- we expose a function than can write entries directly (not through the window)
-    -- so that user can set up their own key bindings.
-    if 1 <= n and n <=5  then
-        local loc_info = cursor2item()
-        M.items[n] = loc_info
-        save(M.items)
-    end
+-- @tparam n int
+function M.record_cursor(n)
+    insert(n, cursor2item())
 end
 
+-- Jump to the location stored in the n-th item
+--
+-- @tparam n int
 function M.goto(n)
     if vim.version().minor < 9 and vim.version().major <= 0 then
         prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
@@ -461,13 +479,13 @@ function M.goto(n)
     flash_line()
 end
 
+-- Get the stored line information corresponding to item n, or ""
+-- Can be used to fuzzy search in the buffer.
+--
+-- @param n int
+-- @return str
 function M.get(n)
-    -- get the stored line information corresponding to entry n
-    -- can be used to search it in the buffer
-    if M.items[n] == vim.NIL then
-        return ""
-    end
-    return M.items[n].content
+    return (M.items[n] == vim.NIL) and "" or M.items[n].content
 end
 
 return M
