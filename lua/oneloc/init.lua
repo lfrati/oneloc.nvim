@@ -1,8 +1,7 @@
 local M = {}
 local api = vim.api
 local uv = vim.loop
-local version = '1.1.0'
-
+local version = '1.2.0'
 
 
 local LIFOStack = {}
@@ -68,7 +67,7 @@ local function flash_line()
     local lnum, _ = unpack(vim.api.nvim_win_get_cursor(0))
     local mask = mask_line(lnum)
     local flash_id = api.nvim_buf_set_extmark(0, flash_ns, lnum - 1, 0, {
-        virt_text = { { mask, M.conf.flash_color } },
+        virt_text = { { mask, M.conf.colors.flash } },
         virt_text_pos = "overlay"
     })
     local bufnr = vim.fn.winbufnr(0)
@@ -225,9 +224,9 @@ local function colorize(items)
                 -- 1 line of padding
                 -- each item spans 3 lines 
                 -- line content is the second line of the 3
-                vim.fn.matchaddpos( M.conf.uptodate_color, {1 + (i-1)*3 + 2})
+                vim.fn.matchaddpos( M.conf.colors.uptodate, {1 + (i-1)*3 + 2})
             else
-                vim.fn.matchaddpos(M.conf.outdated_color, {1 + (i-1)*3 + 2})
+                vim.fn.matchaddpos( M.conf.colors.outdated, {1 + (i-1)*3 + 2})
             end
         end
     end
@@ -270,7 +269,7 @@ local function open_ui()
     -- highlight filenames for easier reading
     -- WARNING: use after setting focus to floating window
     for _,file in pairs(files) do
-        vim.fn.matchadd(M.conf.file_color, file)
+        vim.fn.matchadd(M.conf.colors.file, file)
     end
 
     colorize(M.items)
@@ -383,10 +382,12 @@ end
 
 M.conf = {
     flash_t = 200,
-    flash_color = "OnelocFlash",
-    file_color = "OnelocRed", --        highlight filenames          to be MORE VISIBLE
-    outdated_color = "OnelocGray", --   highlight outdated line info to be LESS VISIBLE
-    uptodate_color = "OnelocGreen", --  highlight uptodate line info to be MORE VISIBLE
+    colors = {
+        flash = "OnelocFlash",--      highlight cursor line       
+        file = "OnelocRed", --        highlight filenames         
+        outdated = "OnelocGray", --   highlight outdated line info
+        uptodate = "OnelocGreen", --  highlight uptodate line info
+    },
     scope = "pos", -- pos : include cursor position information
     width = 70
 }
