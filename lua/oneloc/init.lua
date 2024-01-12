@@ -1,8 +1,11 @@
 local M = {}
 local api = vim.api
 local uv = vim.loop
-local version = '1.2.0'
+local version = '0.3.0'
 
+--------------------------------------------------------------------------------
+-- UTILITIES
+--------------------------------------------------------------------------------
 
 local LIFOStack = {}
 function LIFOStack:new()
@@ -31,7 +34,6 @@ local function check_range(key)
     end
     return vim.NIL
 end
-
 
 -- https://stevedonovan.github.io/ldoc/manual/doc.md.html
 local flash_ns = vim.api.nvim_create_namespace("OnelocFlash")
@@ -85,6 +87,26 @@ local function getkey()
     end
     return key
 end
+
+local function parse(ver)
+    local pattern = "^(%d+)%.(%d+)%.(%d+)$"
+    local major, minor, patch = ver:match(pattern)
+    return {tonumber(major), tonumber(minor), tonumber(patch)}
+end
+
+-- Function to compare version numbers
+-- e.g. {1,0,1} < {1,2,1) < {2,0,1}
+local function is_newer(v1, v2)
+    v1 = parse(v1)
+    v2 = parse(v2)
+    for i = 1, 3 do
+        if v1[i] < v2[i] then
+            return true  -- v1 is newer than v2
+        end
+    end
+    return false  -- v1 is older or equal to v2
+end
+
 
 --------------------------------------------------------------------------------
 -- LOCAL STUFF
@@ -255,10 +277,17 @@ function UI:render(items)
 end
 function UI:colorize(items)
     -- https://stackoverflow.com/a/23247938
-    vim.cmd[[
-        hi Bang ctermfg=yellow guifg=yellow
-        match Bang /\%>1v.*\%<3v/
-    ]]
+    if self.mode == "marks" then
+        vim.cmd[[
+            hi Bang ctermfg=yellow guifg=yellow cterm=bold gui=bold
+            match Bang /\%>1v.*\%<3v/
+        ]]
+    else
+        vim.cmd[[
+            hi Bang ctermfg=lightblue guifg=lightblue cterm=bold gui=bold
+            match Bang /\%>1v.*\%<3v/
+        ]]
+    end
     -- color line based on "does it still match the stored value?"
     for i=1,5 do
         local item = items[i]
@@ -324,39 +353,45 @@ end
 local Core = {}
 function Core:new(json_path)
     local obj = {
-        items = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+        items = {
+            marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+            files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
+        },
         json_path = json_path,
-        stack=LIFOStack:new()
+        stack={
+            marks = LIFOStack:new(),
+            files = LIFOStack:new()
+        }
     }
     setmetatable(obj, self)
     self.__index = self
     return obj
 end
-function Core:insert(key, item)
+function Core:insert(key, item, mode)
     local n = check_range(key)
     if n == vim.NIL then
         return
     end
-    self.stack:push({pos=n, item=self.items[n]})
-    self.items[n] = item
+    self.stack[mode]:push({pos=n, item=self.items[mode][n]})
+    self.items[mode][n] = item
     save(self.items, self.json_path)
 end
-function Core:remove(key)
+function Core:remove(key, mode)
     local n = check_range(key)
-    if n == vim.NIL or self.items[n] == vim.NIL then
+    if n == vim.NIL or self.items[mode][n] == vim.NIL then
         return
     end
 
-    self.stack:push({pos=n, item=self.items[n]})
-    self.items[n] = vim.NIL
+    self.stack[mode]:push({pos=n, item=self.items[mode][n]})
+    self.items[mode][n] = vim.NIL
     save(self.items, self.json_path)
 end
-function Core:undo()
-    local action = self.stack:pop()
+function Core:undo(mode)
+    local action = self.stack[mode]:pop()
     if action == vim.NIL then
         return
     end
-    self.items[action.pos] = action.item
+    self.items[mode][action.pos] = action.item
     save(self.items, self.json_path)
 end
 function Core:goto(key, mode)
@@ -366,7 +401,7 @@ function Core:goto(key, mode)
     end
 
     self.items = load(self.json_path)
-    local destination = self.items[n]
+    local destination = self.items[mode][n]
 
     if destination == vim.NIL then
         print("No location found for "..n)
@@ -387,7 +422,7 @@ local function show(ui, core)
         return nil
     end
 
-    ui:open(core.items)
+    ui:open(core.items[ui.mode])
 
     --    ESC : close the UI
     --  [1-5] : jump to the corresponding entry
@@ -403,20 +438,20 @@ local function show(ui, core)
             ui.mode = (ui.mode == "marks") and "files" or "marks"
         elseif key == "D" then
             for i =1,5 do
-                core:remove(i)
+                core:remove(i, ui.mode)
             end
         elseif key == "d" then
-            core:remove(getkey())
+            core:remove(getkey(), ui.mode)
         elseif key == "u" then
-            core:undo()
+            core:undo(ui.mode)
         else
             ui:close()
-            core:goto(key)
+            core:goto(key, ui.mode)
         end
-        ui:open(core.items)
+        ui:open(core.items[ui.mode])
     end
 
-    ui:close(core.items)
+    ui:close(core.items[ui.mode])
 end
 
 --==============================================================================
@@ -437,7 +472,7 @@ M.conf = {
     width = 70,
     mode = "files",
     colors = {
-        flash = "OnelocFlash",--      highlight cursor line       
+        flash = "OnelocFlash", --     highlight cursor line       
         file = "OnelocRed", --        highlight file name
         outdated = "OnelocGray", --   highlight outdated line info
         uptodate = "OnelocGreen", --  highlight uptodate line info
@@ -452,14 +487,24 @@ function M.setup(user_conf)
     end
 
     M.conf = vim.tbl_deep_extend("force", M.conf, user_conf or {})
-    M.json_path = vim.fn.stdpath("data") .. "/oneloc_"..version..".json"
+    M.json_path = vim.fn.stdpath("data") .. "/oneloc.json"
     M.ui = UI:new(M.conf.colors, M.conf.width, M.conf.mode)
     M.core = Core:new(M.json_path)
 
     if vim.fn.filereadable(M.json_path) == 0 then
-        save({vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}, M.json_path)
+        save({marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              version = version}, M.json_path)
     end
+
     M.core.items = load(M.json_path)
+
+    if is_newer(M.core.items.version, version) then
+        save({marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              version = version}, M.json_path)
+        M.core.items = load(M.json_path)
+    end
 
     vim.api.nvim_create_augroup('OnelocColors', { clear = true })
     vim.api.nvim_create_autocmd('BufEnter', {
@@ -482,7 +527,7 @@ end
 -- @tparam n int
 function M.record_cursor(n)
     local item = cursor2item()
-    M.core:insert(n, item)
+    M.core:insert(n, item, M.ui.mode)
 end
 
 -- Jump to the location stored in the n-th item
