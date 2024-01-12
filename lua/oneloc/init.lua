@@ -1,8 +1,12 @@
 local M = {}
 local api = vim.api
 local uv = vim.loop
-local version = '1.2.0'
+local version = '0.3.0'
 
+
+--------------------------------------------------------------------------------
+-- UTILITIES
+--------------------------------------------------------------------------------
 
 local LIFOStack = {}
 function LIFOStack:new()
@@ -20,10 +24,20 @@ function LIFOStack:pop()
     return table.remove(self.data)
 end
 
--- https://stevedonovan.github.io/ldoc/manual/doc.md.html
+-- @param key string or number
+local function check_range(key)
+    if type(key) == "number" then
+        key = tostring(key)
+    end
+    local num = key:match("^[1-5]$")
+    if num then
+        return tonumber(num)
+    end
+    return vim.NIL
+end
 
+-- https://stevedonovan.github.io/ldoc/manual/doc.md.html
 local flash_ns = vim.api.nvim_create_namespace("OnelocFlash")
-local win = nil
 
 -- from :help uv.new_timer()
 local function set_timeout(timeout, callback)
@@ -50,18 +64,6 @@ local function mask_line(lnum)
     return mask
 end
 
-local function getkey()
-    local key = vim.fn.getchar()
-    if type(key) == 'number' then
-        return vim.fn.nr2char(key)
-    end
-    return key
-end
-
---------------------------------------------------------------------------------
--- LOCAL STUFF
---------------------------------------------------------------------------------
-
 local function flash_line()
     -- Make the current line flash to help me find it more easily.
     local lnum, _ = unpack(vim.api.nvim_win_get_cursor(0))
@@ -79,22 +81,37 @@ local function flash_line()
         end))
 end
 
-local function save(tbl)
-    local json = vim.json.encode(tbl)
-    local ok, result = pcall(vim.fn.writefile, { json }, M.json_path)
-    if ok == false then
-        print(result)
+local function getkey()
+    local key = vim.fn.getchar()
+    if type(key) == 'number' then
+        return vim.fn.nr2char(key)
     end
+    return key
 end
 
-local function load()
-    local ok, result = pcall(vim.fn.readfile, M.json_path)
-    if ok then
-        return vim.json.decode(result[1])
-    else
-        error("ERROR: could not load " .. M.json_path)
-    end
+local function parse(ver)
+    local pattern = "^(%d+)%.(%d+)%.(%d+)$"
+    local major, minor, patch = ver:match(pattern)
+    return {tonumber(major), tonumber(minor), tonumber(patch)}
 end
+
+-- Function to compare version numbers
+-- e.g. {1,0,1} < {1,2,1) < {2,0,1}
+local function is_newer(v1, v2)
+    v1 = parse(v1)
+    v2 = parse(v2)
+    for i = 1, 3 do
+        if v1[i] < v2[i] then
+            return true  -- v1 is newer than v2
+        end
+    end
+    return false  -- v1 is older or equal to v2
+end
+
+
+--------------------------------------------------------------------------------
+-- LOCAL STUFF
+--------------------------------------------------------------------------------
 
 local function prompt(msg, style)
     vim.cmd.redraw()
@@ -103,7 +120,6 @@ end
 
 local function read_nth_line(path, n)
     local line_count = 0
-
     for line in io.lines(path) do
         line_count = line_count + 1
         if line_count == n then
@@ -111,16 +127,6 @@ local function read_nth_line(path, n)
         end
     end
     return nil  -- Return nil if the file has fewer than n lines
-end
-
-local function read_line_at_bytes(path, nbytes)
-    local file = io.open(path, "rb")
-    if file then
-      file:seek("set", nbytes - 1)
-      local line = file:read()
-      file:close()
-      return line
-    end
 end
 
 local function fit_path_to_window(path, head, tail)
@@ -152,52 +158,9 @@ local function fit_line_to_window(line)
     return line
 end
 
-local function render(items)
-    local lines = {}
-    local files = {} -- used to highlight filenames
 
-    table.insert(lines, "")
-    for i=1,5 do
-        local item = items[i]
-        local content
-        local entry
-        if item ~= vim.NIL then
-            table.insert(files, item.filename)
-            local path = item.path
-            if M.conf.scope == "pos" then
-                local head = " " .. i .. " "
-                local tail = ":"..item.lnum..":"..item.cnum.." "
-                entry = fit_path_to_window(path, head, tail)
-                content = fit_line_to_window("    " .. item.content)
-            else
-                entry = fit_line_to_window(" "..i.." "..path.." ")
-                content = ""
-            end
-        else
-            entry = fit_line_to_window(" "..i.."                        ")
-            content = ""
-        end
-
-        table.insert(lines, entry)
-        -- content lines are colored after window is created
-        table.insert(lines, content)
-        table.insert(lines, "")
-    end
-
-    return lines, files
-end
-
-local function check_if_same(item)
-
-    -- fast path
-    local current = read_line_at_bytes(item.path, item.bytes_offset)
-    current = string.gsub(current, "^%s*(.-)%s*$", "%1")
-    if current == item.content then
-        return true
-    end
-
-    -- slow path
-    current = read_nth_line(item.path, item.lnum)
+local function is_still_valid(item)
+    local current = read_nth_line(item.path, item.lnum)
     if current then
         current = string.gsub(current, "^%s*(.-)%s*$", "%1")
         if current == item.content then
@@ -208,90 +171,14 @@ local function check_if_same(item)
     return false
 end
 
-local function colorize(items)
-
-    -- https://stackoverflow.com/a/23247938
-    vim.cmd[[
-        hi Bang ctermfg=yellow guifg=yellow
-        match Bang /\%>1v.*\%<3v/
-    ]]
-
-    -- color line based on "does it still match the stored value?"
-    for i=1,5 do
-        local item = items[i]
-        if item ~= vim.NIL then
-            if check_if_same(item) then
-                -- 1 line of padding
-                -- each item spans 3 lines 
-                -- line content is the second line of the 3
-                vim.fn.matchaddpos( M.conf.colors.uptodate, {1 + (i-1)*3 + 2})
-            else
-                vim.fn.matchaddpos( M.conf.colors.outdated, {1 + (i-1)*3 + 2})
-            end
-        end
-    end
-end
-
-local function open_ui()
-    -- if win exists already (~nil) delete it
-    -- then create a floating win with the num-loc mappings
-    if win then
-        vim.api.nvim_win_close(win, true)
-    end
-
-    local lines, files = render(M.items)
-
-    -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
-    local H = vim.api.nvim_list_uis()[1].height
-    local W = vim.api.nvim_list_uis()[1].width
-    local buf = vim.api.nvim_create_buf(false, true)
-    local opts = {
-        relative = 'win',
-        width = M.conf.width,
-        height = #lines,
-        row = (H - #lines) * 0.5,
-        col = (W - M.conf.width) * 0.5,
-        anchor = 'NW',
-        style = 'minimal',
-        title = "Locations",
-        title_pos = 'center',
-        border = 'rounded'
-    }
-
-    vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
-    win = vim.api.nvim_open_win(buf, false, opts)
-    vim.api.nvim_win_set_option(win, 'winhl', 'Normal:')
-    vim.api.nvim_set_current_win(win)
-
-    -- WARNING: use after setting focuss to floating window
-    M.set_tui_colors()
-
-    -- highlight filenames for easier reading
-    -- WARNING: use after setting focus to floating window
-    for _,file in pairs(files) do
-        vim.fn.matchadd(M.conf.colors.file, file)
-    end
-
-    colorize(M.items)
-
-    vim.cmd.redraw()
-end
-
-local function close_ui()
-    if win then
-        vim.api.nvim_win_close(win, true)
-        win = nil
-    end
-end
-
-local function safe_landing(item)
+-- @param mode string ["files", "marks"]
+local function safe_landing(item, mode)
 
     vim.cmd.edit(item.path)
     print("Moved to: " .. item.path)
 
-    if M.conf.scope == "pos" then
+    if mode == "marks" then
         -- we need to check we are landing somewhere that exists
-
         local nlines = vim.api.nvim_buf_line_count(0)
         -- target line exists
         if nlines < item.lnum  then
@@ -317,64 +204,260 @@ local function cursor2item()
     local path = vim.api.nvim_buf_get_name(0)
     local lnum, cnum = unpack(vim.api.nvim_win_get_cursor(0))
     return {
-        lnum=lnum, -- 1 indexed
-        cnum=cnum, -- 0 indexed >_>
-        path=path, -- full path
-        filename=vim.fn.expand("%:t"), -- filename only, for highlight
+        lnum = lnum, -- 1 indexed
+        cnum = cnum, -- 0 indexed >_>
+        path = path, -- full path
+        file = vim.fn.expand("%:t"), -- file name only, for highlight
         -- remove leading and trailing spaces to show preview
         content = string.gsub(vim.fn.getline(lnum), "^%s*(.-)%s*$", "%1"),
-        -- bytes offset of the stored line to check if it has change 
-        bytes_offset = vim.fn.line2byte(lnum)
     }
 end
 
-local function insert(n, item)
-    if 1 <= n and n <=5  then
-        M.stack:push({op="insert", pos=n, item=M.items[n]})
-        M.items[n] = item
-        save(M.items)
+local function save(items, path)
+    local json = vim.json.encode(items)
+    local ok, result = pcall(vim.fn.writefile, { json }, path)
+    if ok == false then
+        print(result)
+    end
+end
+local function load(path)
+    local ok, result = pcall(vim.fn.readfile, path)
+    if ok then
+        return vim.json.decode(result[1])
+    else
+        error("ERROR: could not load " .. path)
     end
 end
 
-local function remove(n)
-    if M.items[n] then
-        M.stack:push({op="insert", pos=n, item=M.items[n]})
-        M.items[n] = vim.NIL
-        save(M.items)
+-- ============================================================================
+-- =======================        UI          =================================
+-- ============================================================================
+
+local UI = {}
+function UI:new(colors, width, mode)
+    local obj = {
+        items = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+        mode = mode,
+        colors=colors,
+        width=width,
+        win=nil,
+    }
+    setmetatable(obj, self)
+    self.__index = self
+    return obj
+end
+function UI:render(items)
+    local lines = {}
+
+    table.insert(lines, "")
+    for i=1,5 do
+        local item = items[i]
+        local entry = fit_line_to_window(" "..i)
+        local content = ""
+        if item ~= vim.NIL then
+            if self.mode == "files" then
+                local head = " " .. i .. " "
+                local tail = ""
+                entry = fit_path_to_window(item.path, head, tail)
+                content = fit_line_to_window("    " .. item.content)
+            else
+                local head = " " .. i .. " "
+                local tail = ":"..item.lnum..":"..item.cnum.." "
+                entry = fit_path_to_window(item.path, head, tail)
+                content = fit_line_to_window("    " .. item.content)
+            end
+        end
+
+        table.insert(lines, entry)
+        -- content lines are colored after window is created
+        table.insert(lines, content)
+        table.insert(lines, "")
+    end
+
+    return lines
+end
+function UI:colorize(items)
+    -- https://stackoverflow.com/a/23247938
+    vim.cmd[[
+        hi Bang ctermfg=yellow guifg=yellow cterm=bold gui=bold
+        match Bang /\%>1v.*\%<3v/
+    ]]
+    -- color line based on "does it still match the stored value?"
+    for i=1,5 do
+        local item = items[i]
+        if item ~= vim.NIL then
+            vim.fn.matchadd(self.colors.file, item.file)
+            if is_still_valid(item) then
+                -- 1 line of padding
+                -- each item spans 3 lines 
+                -- line content is the second line of the 3
+                vim.fn.matchaddpos(self.colors.uptodate, {1 + (i-1)*3 + 2})
+            else
+                vim.fn.matchaddpos(self.colors.outdated, {1 + (i-1)*3 + 2})
+            end
+        end
+    end
+end
+function UI:open(items)
+    -- if win exists already (~nil) delete it
+    -- then create a floating win with the num-loc mappings
+    if self.win then
+        vim.api.nvim_win_close(self.win, true)
+    end
+
+    local lines = self:render(items)
+
+    -- https://jacobsimpson.github.io/nvim-lua-manual/docs/interacting/
+    local H = vim.api.nvim_list_uis()[1].height
+    local W = vim.api.nvim_list_uis()[1].width
+    local buf = vim.api.nvim_create_buf(false, true)
+    local opts = {
+        relative = 'editor',
+        width = self.width,
+        height = #lines,
+        row = (H - #lines) * 0.5,
+        col = (W - self.width) * 0.5,
+        anchor = 'NW',
+        style = 'minimal',
+        title = "Locations (".. self.mode .. ")",
+        title_pos = 'center',
+        border = 'rounded'
+    }
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
+    self.win = vim.api.nvim_open_win(buf, false, opts)
+    vim.api.nvim_win_set_option(self.win, 'winhl', 'Normal:')
+    vim.api.nvim_set_current_win(self.win)
+
+    self:colorize(items)
+
+    vim.cmd.redraw()
+end
+function UI:close()
+    if self.win then
+        vim.api.nvim_win_close(self.win, true)
+        self.win = nil
     end
 end
 
-local function undo()
-    local action = M.stack:pop()
-    if action == vim.NIL then
+-- ============================================================================
+-- =======================       CORE         =================================
+-- ============================================================================
+
+local Core = {}
+function Core:new(json_path)
+    local obj = {
+        items = {
+            marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+            files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL}
+        },
+        json_path = json_path,
+        stack={
+            marks = LIFOStack:new(),
+            files = LIFOStack:new()
+        }
+    }
+    setmetatable(obj, self)
+    self.__index = self
+    return obj
+end
+function Core:insert(key, item, mode)
+    local n = check_range(key)
+    if n == vim.NIL then
+        return
+
+    end
+    self.stack[mode]:push({pos=n, item=self.items[mode][n]})
+    self.items[mode][n] = item
+    save(self.items, self.json_path)
+end
+function Core:remove(key, mode)
+    local n = check_range(key)
+    if n == vim.NIL or self.items[mode][n] == vim.NIL then
         return
     end
 
-    if action.op == "insert" then
-        M.items[action.pos] = action.item
-        save(M.items)
+    self.stack[mode]:push({pos=n, item=self.items[mode][n]})
+    self.items[mode][n] = vim.NIL
+    save(self.items, self.json_path)
+end
+function Core:undo(mode)
+    local action = self.stack[mode]:pop()
+    if action == vim.NIL then
+        return
     end
+    self.items[mode][action.pos] = action.item
+    save(self.items, self.json_path)
+end
+function Core:goto(key, mode)
+    local n = check_range(key)
+    if n == vim.NIL then
+        return
+    end
+
+    self.items = load(self.json_path)
+    local destination = self.items[mode][n]
+
+    if destination == vim.NIL then
+        print("No location found for "..n)
+        return
+    end
+
+    safe_landing(destination, mode)
+    flash_line()
 end
 
-local function check_range(key)
-    local num = key:match("^[1-5]$")
-    if num then
-        return tonumber(num) or 1 -- or 1 to silence the check nil nagging
+--==============================================================================
+--==============             MAIN LOOP               ===========================
+--==============================================================================
+
+local function show(ui, core)
+    if vim.version().minor < 9 and vim.version().major <= 0 then
+        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
+        return nil
     end
+
+    ui:open(core.items[ui.mode])
+
+    --    ESC : close the UI
+    --  [1-5] : jump to the corresponding entry
+    --      D : delete all location
+    -- d[1-5] : delete one location
+    --      u : undo last insertion/deletion
+    --    TAB : switch between marks/files mode
+    while (true) do
+        local key = getkey()
+
+        if key == M.K_ESC then
+            break
+        elseif key == M.K_TAB then
+            ui.mode = (ui.mode == "marks") and "files" or "marks"
+        elseif key == "D" then
+            for i =1,5 do
+                core:remove(i, ui.mode)
+            end
+        elseif key == "d" then
+            core:remove(getkey(), ui.mode)
+        elseif key == "u" then
+            core:undo(ui.mode)
+        else
+            ui:close()
+            core:goto(key, ui.mode)
+        end
+        ui:open(core.items[ui.mode])
+    end
+
+    ui:close(core.items[ui.mode])
 end
 
---------------------------------------------------------------------------------
--- EXPORTED STUFF
---------------------------------------------------------------------------------
+--==============================================================================
+--==============             EXPORTED STUFF          ===========================
+--==============================================================================
 
 -- from https://jdhao.github.io/2020/09/22/highlight_groups_cleared_in_nvim/
 -- some colorschemes can clear existing highlights >_>
--- to make sure our colors works we set them every time search is started
-function M.set_editor_colors()
+function M.set_colors()
     vim.api.nvim_set_hl(0, 'OnelocFlash', { fg = "#d4d4d4", bg = "#613315", bold = true })
-end
-
-function M.set_tui_colors()
     vim.api.nvim_set_hl(0, 'OnelocGreen', { fg = "green", bold = true })
     vim.api.nvim_set_hl(0, 'OnelocRed', { fg = "red", bold = true })
     vim.api.nvim_set_hl(0, 'OnelocGray', { fg = "gray", bold = true })
@@ -382,111 +465,76 @@ end
 
 M.conf = {
     flash_t = 200,
+    width = 70,
+    mode = "files",
     colors = {
-        flash = "OnelocFlash",--      highlight cursor line       
-        file = "OnelocRed", --        highlight filenames         
+        flash = "OnelocFlash", --     highlight cursor line       
+        file = "OnelocRed", --        highlight file name
         outdated = "OnelocGray", --   highlight outdated line info
         uptodate = "OnelocGreen", --  highlight uptodate line info
-    },
-    scope = "pos", -- pos : include cursor position information
-    width = 70
+    }
 }
 M.K_ESC = api.nvim_replace_termcodes('<Esc>', true, false, true)
 M.K_TAB = api.nvim_replace_termcodes('<Tab>', true, false, true)
-M.stack = LIFOStack:new()
 
 function M.setup(user_conf)
-    M.conf = vim.tbl_deep_extend("force", M.conf, user_conf or {})
-    M.json_path = vim.fn.stdpath("data") .. "/oneloc_"..version..".json"
-    if vim.fn.filereadable(M.json_path) == 0 then
-        save({vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL})
-        print("Initialized "..M.json_path)
-    end
-    M.items = load()
-end
-
-function M.show()
     if vim.version().minor < 9 and vim.version().major <= 0 then
         prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
-        return nil
     end
 
-    open_ui()
+    M.conf = vim.tbl_deep_extend("force", M.conf, user_conf or {})
+    M.json_path = vim.fn.stdpath("data") .. "/oneloc.json"
+    M.ui = UI:new(M.conf.colors, M.conf.width, M.conf.mode)
+    M.core = Core:new(M.json_path)
 
-    --    ESC : close the UI
-    --  [1-5] : jump to the corresponding entry
-    --      D : delete all location
-    -- d[1-5] : delete one location
-    --    TAB : toggle scope (file vs pos)
-    --      u : undo last insertion/deletion
-    while (true) do
-        local key = getkey()
+    if vim.fn.filereadable(M.json_path) == 0 then
+        save({marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              version = version}, M.json_path)
+    end
 
-        if key == M.K_ESC then
-            break
-        elseif key == "D" then
-            for i =1,5 do
-                if M.items[i] ~= vim.NIL then
-                    remove(i)
-                end
-            end
-        elseif key == "d" then
-            local num = check_range(getkey())
-            if num then
-                remove(num)
-            end
-        elseif key == M.K_TAB then
-            M.conf.scope = (M.conf.scope == "file") and "pos" or "file"
-        elseif key == "u" then
-            undo()
-        else
-            local num = check_range(key)
-            if num then
-                close_ui()
-                M.goto(num)
-            end
+    M.core.items = load(M.json_path)
+
+    if is_newer(M.core.items.version, version) then
+        save({marks = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              files = {vim.NIL, vim.NIL, vim.NIL, vim.NIL, vim.NIL},
+              version = version}, M.json_path)
+        M.core.items = load(M.json_path)
+    end
+
+    vim.api.nvim_create_augroup('OnelocColors', { clear = true })
+    vim.api.nvim_create_autocmd('BufEnter', {
+        group = "OnelocColors",
+        pattern = '',
+        callback = function()
+            M.core.items = load(M.json_path)
         end
-        open_ui()
-    end
+    })
+    vim.api.nvim_create_autocmd('BufLeave', {
+        group = "OnelocColors",
+        pattern = '',
+        callback = function()
+            save(M.core.items, M.json_path)
+        end
+    })
 
-    close_ui()
-    prompt("", 'Nornmal')
 end
 
 -- @tparam n int
 function M.record_cursor(n)
-    insert(n, cursor2item())
+    local item = cursor2item()
+    M.core:insert(n, item, M.ui.mode)
 end
 
 -- Jump to the location stored in the n-th item
 --
 -- @tparam n int
 function M.goto(n)
-    if vim.version().minor < 9 and vim.version().major <= 0 then
-        prompt("Oneloc requires NVIM >= 0.9", "WarningMsg")
-        return
-    end
-
-    M.set_editor_colors()
-
-    M.items = load()
-    local destination = M.items[n]
-    if destination == vim.NIL then
-        print("No location found for "..n)
-        return
-    end
-
-    safe_landing(destination)
-    flash_line()
+    M.set_colors()
+    M.core:goto(n, M.ui.mode)
 end
-
--- Get the stored line information corresponding to item n, or ""
--- Can be used to fuzzy search in the buffer.
---
--- @param n int
--- @return str
-function M.get(n)
-    return (M.items[n] == vim.NIL) and "" or M.items[n].content
+function M.show()
+    M.set_colors()
+    show(M.ui, M.core)
 end
-
 return M
