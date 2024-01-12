@@ -19,10 +19,12 @@ From there you have a few options:
 - `[1-5]` jump to the corresponding location.
 - `D` delete ALL the locations.
 - `d[1-5]` delete location in position `[1-5]`.
-- `u` undo last insert/delete action
-- `TAB` toggle granularity between `pos` (jump back to line/column where the location was saved) and `file` just open the file (may jump to last position, depending on your setup, see configuration)
+- `u` undo last insert/delete action (no redo)
+- `TAB` toggle mode between `marks` (jump back to line/column where the location was saved) and `file` just open the file (may jump to last position, depending on your setup, see below)
 
-Note: when you add a new location, the line/column information is stored too. This way you can easily use it to move within large files, if you want.
+### What is this `TAB` you speak of?
+- `marks` mode records the line + column of your cursor position so you can jump within a file, a handy replacement for marks
+- `files` mode only sends you to the file as if you used `:edit file`. This is very handy if you set up your editor to restore the last location when re-opening a file check `:h restore-cursor` (or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)).
 
 ## 📦 Installation
 
@@ -35,14 +37,15 @@ Using [lazy](https://github.com/folke/lazy.nvim)
     -- feel free to call just require("oneloc").setup {} if you like them
     require("oneloc").setup {
       flash_t = 200,                --  ms
+      mode = "marks",               --  marks: go back to the recorded cursor position information
+                                    --  files: only go to that file, let your editor decide where
+      width = 70                    --  width of ui window
       colors = {
         flash = "OnelocFlash",      --  highlight cursor line
         file = "OnelocRed",         --  highlight filenames
         outdated = "OnelocGray",    --  highlight outdated line info
         uptodate = "OnelocGreen",   --  highlight uptodate line info
       },
-      scope = "pos",                -- pos : include cursor position information
-      width = 70                    -- width of ui window
     }
     for i=1,5 do
         -- <Leader>[1-5] to go somewhere
@@ -64,9 +67,6 @@ Upon landing somewhere a flash helps find where the cursor is.
 | normal | shorter| shortest |
 |---|---|---|
 | <img width="583" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/65b77920-27ae-40ab-9190-98e053ada35d"> | <img width="439" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/a33c76dd-def5-457b-b1cd-eaaad815c64e"> | <img width="193" alt="image" src="https://github.com/lfrati/oneloc.nvim/assets/3115640/203ad893-b633-49f4-b496-13f6b2a9430c"> |
-  
-Locations include line/column information, this lets you use this plugin as a replacement for marks too.
-- Don't like it and would rather just use it to jump between files? Set the default with `granularity = "file"` in setup. This way you'll go back to files as if you used `:edit file`. If you want to restore the last location when re-opening a file check `:h restore-cursor` or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)
 
 ## Why oneloc.nvim?
 Some time ago I stumbled upon [harpoon](https://www.youtube.com/watch?v=Qnos8aApa9g).
