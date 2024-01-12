@@ -318,7 +318,7 @@ function UI:open(items)
     local W = vim.api.nvim_list_uis()[1].width
     local buf = vim.api.nvim_create_buf(false, true)
     local opts = {
-        relative = 'win',
+        relative = 'editor',
         width = self.width,
         height = #lines,
         row = (H - #lines) * 0.5,
