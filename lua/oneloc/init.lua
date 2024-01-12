@@ -3,6 +3,7 @@ local api = vim.api
 local uv = vim.loop
 local version = '0.3.0'
 
+
 --------------------------------------------------------------------------------
 -- UTILITIES
 --------------------------------------------------------------------------------
@@ -364,6 +365,7 @@ function Core:insert(key, item, mode)
     local n = check_range(key)
     if n == vim.NIL then
         return
+
     end
     self.stack[mode]:push({pos=n, item=self.items[mode][n]})
     self.items[mode][n] = item
@@ -422,6 +424,7 @@ local function show(ui, core)
     --      D : delete all location
     -- d[1-5] : delete one location
     --      u : undo last insertion/deletion
+    --    TAB : switch between marks/files mode
     while (true) do
         local key = getkey()
 

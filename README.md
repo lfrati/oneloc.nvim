@@ -26,6 +26,7 @@ From there you have a few options:
 - `marks` mode records the line + column of your cursor position so you can jump within a file, a handy replacement for marks
 - `files` mode only sends you to the file as if you used `:edit file`. This is very handy if you set up your editor to restore the last location when re-opening a file check `:h restore-cursor` (or [this issue](https://github.com/neovim/neovim/issues/16339#issuecomment-1457394370)).
 
+
 ## 📦 Installation
 
 Requires `neovim >= 0.9`
@@ -39,13 +40,14 @@ Using [lazy](https://github.com/folke/lazy.nvim)
       flash_t = 200,                --  ms
       mode = "marks",               --  marks: go back to the recorded cursor position information
                                     --  files: only go to that file, let your editor decide where
-      width = 70                    --  width of ui window
+      width = 70,                   --  width of ui window
+
       colors = {
         flash = "OnelocFlash",      --  highlight cursor line
         file = "OnelocRed",         --  highlight filenames
         outdated = "OnelocGray",    --  highlight outdated line info
         uptodate = "OnelocGreen",   --  highlight uptodate line info
-      },
+      }
     }
     for i=1,5 do
         -- <Leader>[1-5] to go somewhere
