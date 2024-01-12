@@ -277,17 +277,10 @@ function UI:render(items)
 end
 function UI:colorize(items)
     -- https://stackoverflow.com/a/23247938
-    if self.mode == "marks" then
-        vim.cmd[[
-            hi Bang ctermfg=yellow guifg=yellow cterm=bold gui=bold
-            match Bang /\%>1v.*\%<3v/
-        ]]
-    else
-        vim.cmd[[
-            hi Bang ctermfg=lightblue guifg=lightblue cterm=bold gui=bold
-            match Bang /\%>1v.*\%<3v/
-        ]]
-    end
+    vim.cmd[[
+        hi Bang ctermfg=yellow guifg=yellow cterm=bold gui=bold
+        match Bang /\%>1v.*\%<3v/
+    ]]
     -- color line based on "does it still match the stored value?"
     for i=1,5 do
         local item = items[i]
@@ -535,7 +528,7 @@ end
 -- @tparam n int
 function M.goto(n)
     M.set_colors()
-    M.core:goto(n)
+    M.core:goto(n, M.ui.mode)
 end
 function M.show()
     M.set_colors()
